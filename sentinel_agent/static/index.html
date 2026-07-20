@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SentinelAgent Lab</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">OFFLINE AGENT RESEARCH LAB</div>
+      <h1>Sentinel<span>Agent</span></h1>
+      <p>A safety-aware computer-use agent that plans locally, verifies every action, and pauses before changing the outside world.</p>
+      <div id="health" class="health">Checking local model…</div>
+    </header>
+
+    <section class="control-panel">
+      <label for="instruction">Task instruction</label>
+      <textarea id="instruction" rows="4">Open the college portal, compare my attendance with the timetable, identify subjects below 75%, create a report, and send it by email.</textarea>
+      <div class="controls">
+        <label class="toggle"><input id="use-model" type="checkbox" checked><span>Use local 7B model</span></label>
+        <label><span>Environment</span><select id="disturbance"><option value="">Normal</option><option value="popup">Announcement popup</option></select></label>
+        <button id="run">Run agent <span>→</span></button>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <article>
+        <div class="section-head"><h2>Execution trace</h2><span id="status" class="badge">READY</span></div>
+        <div id="timeline" class="timeline"><p class="empty">A verified action trace will appear here.</p></div>
+      </article>
+      <aside>
+        <h2>Observed result</h2>
+        <pre id="result">No run yet.</pre>
+      </aside>
+    </section>
+
+    <dialog id="approval">
+      <div class="warning">!</div>
+      <h2>Human approval required</h2>
+      <p id="approval-text"></p>
+      <div class="dialog-actions"><button id="reject" class="secondary">Reject</button><button id="approve">Approve once</button></div>
+    </dialog>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
