@@ -143,4 +143,30 @@ Produce the reproducible benchmark, ablation study, architecture documentation, 
 
 ## Safety boundary
 
+### Zero Trust egress gateway — implementation in progress
+
+The first implementation stage adds `sentinel_agent.egress.config` and
+`sentinel_agent.egress.policy`. These derive exact local model endpoints and
+provider host allowlists from operator-owned model profiles, allow YouTube as
+an approved site, reject raw IP destinations outside configured local models,
+enforce remote HTTPS, and check every DNS answer for prohibited IP addresses.
+An allowed decision contains the validated `pinned_ip` for a future proxy to
+connect to without resolving the hostname again. Unknown public hosts remain
+denied and return `approval_required=True` for later approval integration.
+
+The policy is not yet connected to model HTTP calls or browser actions: **this
+stage alone does not enforce network routing**. Proxy, DLP, telemetry, approval
+integration, and measured red-team results follow in separate stages.
+
+Policy details: matching is by exact normalized hostname, never suffix or
+wildcard; local exceptions include scheme and port; non-ASCII hostnames are
+rejected (use an explicitly configured ASCII IDNA hostname when needed).
+Punycode hosts need explicit allowlisting and still undergo DNS checks.
+Plain remote HTTP on port 80 reports `tls-required`, matching scenario A9;
+other prohibited ports report `port`. Configuration of model profiles is a
+trusted operator action, since adding a cloud profile grants its hostname.
+
+Run the offline policy tests with `python -m pytest tests/test_egress_policy.py -q`.
+They use fake resolvers and do not contact the internet.
+
 Real browser control is disabled by default. Keep all experiments on a local portal clone or accounts created specifically for testing. Credentials, CAPTCHAs, payments and security bypasses are outside project scope.
