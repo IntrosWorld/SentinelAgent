@@ -143,30 +143,286 @@ Produce the reproducible benchmark, ablation study, architecture documentation, 
 
 ## Safety boundary
 
-### Zero Trust egress gateway — implementation in progress
+### Zero Trust egress gateway
 
-The first implementation stage adds `sentinel_agent.egress.config` and
-`sentinel_agent.egress.policy`. These derive exact local model endpoints and
-provider host allowlists from operator-owned model profiles, allow YouTube as
-an approved site, reject raw IP destinations outside configured local models,
-enforce remote HTTPS, and check every DNS answer for prohibited IP addresses.
-An allowed decision contains the validated `pinned_ip` for a future proxy to
-connect to without resolving the hostname again. Unknown public hosts remain
-denied and return `approval_required=True` for later approval integration.
+The gateway defaults on for agent-owned model HTTP calls. It combines endpoint
+prompt inspection with an authenticated loopback forward proxy. This is an
+application-scoped research control, **not an OS firewall or a full DLP product**.
+Browser integration is partial; see its limitations below before a live demo.
 
-The policy is not yet connected to model HTTP calls or browser actions: **this
-stage alone does not enforce network routing**. Proxy, DLP, telemetry, approval
-integration, and measured red-team results follow in separate stages.
+```text
+LLM adapter -> EgressClient -> destination pre-check -> JSON DLP
+                                    |
+                                    v
+               authenticated HTTP / HTTPS CONNECT proxy
+               -> destination policy -> DNS validation -> pinned IP
+               -> ClientHello SNI comparison -> byte relay
+                                    |
+                                    v
+                          permitted model endpoint
 
-Policy details: matching is by exact normalized hostname, never suffix or
-wildcard; local exceptions include scheme and port; non-ASCII hostnames are
-rejected (use an explicitly configured ASCII IDNA hostname when needed).
-Punycode hosts need explicit allowlisting and still undergo DNS checks.
-Plain remote HTTP on port 80 reports `tls-required`, matching scenario A9;
-other prohibited ports report `port`. Configuration of model profiles is a
-trusted operator action, since adding a cloud profile grants its hostname.
+Desktop URL -> same policy + query DLP -> Chromium/Edge proxy flag
+                                        (authentication limitation below)
 
-Run the offline policy tests with `python -m pytest tests/test_egress_policy.py -q`.
-They use fake resolvers and do not contact the internet.
+Client decisions + proxy connections -> per-run hash-chained JSONL
+```
 
-Real browser control is disabled by default. Keep all experiments on a local portal clone or accounts created specifically for testing. Credentials, CAPTCHAs, payments and security bypasses are outside project scope.
+#### Files and responsibilities
+
+| File under `sentinel_agent/egress/` | Responsibility |
+|---|---|
+| `config.py` | Normalize endpoints and derive exact allowlists from model profiles |
+| `policy.py` | Destination decisions, DNS/IP checks, IP pinning, temporary approval grants |
+| `dlp.py` | Recursive JSON scanning, validators, severity decisions and typed redaction |
+| `sni.py` | Bounded TLS ClientHello parsing, including fragmented records |
+| `proxy.py` | Authenticated HTTP forwarding, CONNECT tunnels, limits and byte counters |
+| `client.py` | Model HTTP boundary and per-run gateway lifecycle on a dedicated event-loop thread |
+| `telemetry.py` | Canonical JSON, hash chaining, verification and summaries |
+| `lab.py`, `redteam.py`, `measure.py` | Offline TLS fixture, security scenarios and benchmark |
+
+`llm.py` uses `EgressClient` for model calls and health checks. `agent.py` owns
+run lifetime, publishes DLP/policy events and handles eligible browser approvals.
+`desktop.py` checks URLs before launching. No model decides network policy.
+
+#### Destination rules
+
+Local model exceptions are exact `(hostname, port, scheme)` tuples from trusted
+operator-owned profiles. Only these permit local HTTP. All other raw IP literals
+are denied. Malformed/non-ASCII hosts are rejected; punycode requires explicit
+allowlisting. Matching uses normalized exact hostnames, never suffixes/wildcards.
+Remote connections require HTTPS on port 443. Remote HTTP on port 80 returns
+`tls-required`; other disallowed ports return `port`.
+
+Every DNS answer must pass `ipaddress` checks: private, loopback, link-local,
+multicast, reserved and unspecified destinations are denied. The proxy connects
+to a validated numeric `pinned_ip`, not a freshly resolved hostname. Model-provider
+hosts come from profiles; approved sites default to YouTube. Everything else is
+denied. An unknown public browser destination can use the existing approval flow
+to grant its exact host/port/scheme for that run only; approval cannot override
+private-IP, syntax or transport restrictions. Model requests fail closed rather
+than presenting a browser-action approval. Editing profiles is a trusted action.
+
+The proxy binds only to `127.0.0.1`; port 0 chooses a free port per run. A random
+token is required using Basic proxy authentication. `httpx` ignores environment
+proxies (`trust_env=False`) and redirects are not followed. The proxy checks SNI
+against CONNECT authority when SNI is present, without terminating TLS. No-SNI
+ClientHellos are accepted under destination policy. After CONNECT returns 200,
+an SNI rejection closes the tunnel and logs its reason; it cannot return a new
+plaintext HTTP 403 inside a TLS handshake. Earlier policy denials return 403 and
+`X-Sentinel-Block`; missing authentication returns 407.
+
+Defaults: 10-second connect timeout, 30-second idle timeout, 64 connections,
+16 KiB headers and 4 MiB plain-HTTP request bodies. HTTP forwarding rejects
+ambiguous framing, rewrites Host and forwards one request per connection.
+CONNECT relays both directions with backpressure and bounded ClientHello buffering.
+
+#### Prompt DLP
+
+DLP runs before encryption because the proxy cannot read encrypted request bodies.
+It scans JSON strings/keys recursively; password-valued keys receive special handling.
+Findings contain detector IDs, severity and scalar-relative offsets, not matched values.
+
+| Detectors | Severity / validation |
+|---|---|
+| Private keys; OpenAI, Google, GitHub, AWS and Slack key patterns | High; marker/prefix/length |
+| JWTs | High; decoded JSON header/payload and base64url signature (signatures are not JSON) |
+| Password assignments and password-valued JSON keys | High; key-name pattern |
+| Payment cards | High; digit count and Luhn checksum |
+| Aadhaar | High; 12 digits and Verhoeff checksum |
+| PAN | Medium; format pattern |
+| Email and formatted phone numbers | Low; configurable pattern matching |
+
+| Destination | High | Medium | Low |
+|---|---|---|---|
+| Local model | Allow, record findings | Allow | Allow |
+| Model provider | Block, or configured redaction | Redact | Allow and record, or configured redaction |
+| Approved site / other | Block | Redact | Redact |
+
+Redaction inserts typed placeholders such as `[REDACTED:aws-key]`. Overlapping
+matches prefer higher severity, and redacted JSON-key collisions fail closed.
+These checks do not guarantee detection of encoded, split, novel or image-borne
+secrets. They do not scan arbitrary TLS streams or authentication headers. Local
+models intentionally receive original prompts. Audit logs exclude bodies and
+credentials; they still expose destination metadata and need local access controls.
+
+#### Run and inspect
+
+```powershell
+python -m pip install -e ".[dev]"
+sentinel-agent --egress on "Check attendance and create a report" --no-model
+sentinel-agent egress status
+sentinel-agent egress report RUN_ID
+sentinel-agent egress verify RUN_ID
+python -m pytest -q
+python -m sentinel_agent.egress.redteam --output benchmark/egress-redteam.json
+python -m sentinel_agent.egress.measure --samples 50 --output benchmark/egress-measurements.json
+```
+
+Replace `RUN_ID` with the ID in the run's printed audit path. `egress status`
+shows configured defaults, not a probe for a running proxy. Logs are saved as
+`artifacts/egress/<run_id>.jsonl`, including an empty file for a no-network run.
+Reports count decisions by rule, connection destinations, bytes and p50/p95
+connection durations. Those durations are **not** the benchmark's added latency.
+Request-level DLP decisions and connection-level records are separate events.
+
+Environment settings: `SENTINEL_EGRESS_ENABLED=true`, `SENTINEL_EGRESS_PORT=0`,
+`SENTINEL_EGRESS_CLOUD_LOW=allow`, `SENTINEL_EGRESS_REDACT_HIGH=false`, and
+`SENTINEL_EGRESS_LOW_ENABLED=true`. Approved sites can be configured with the
+JSON-list setting `SENTINEL_EGRESS_APPROVED_SITES`. `--egress off` deliberately
+bypasses gateway policy/DLP for task execution; do not use it for security demos.
+Standalone model health checks use the configured default gateway mode.
+
+The spec's DLP table allows low-severity cloud email, but its A3 scenario expects
+redaction. The default follows the table; A3 explicitly uses `cloud_low="redact"`.
+Set `SENTINEL_EGRESS_CLOUD_LOW=redact` to reproduce that stricter behavior in runs.
+
+#### Threat model and limits
+
+- Covers cooperating agent-owned model HTTP paths, accidental prompt-secret
+  disclosure, unapproved destinations, private-address SSRF, DNS rebinding and
+  visible SNI/CONNECT mismatch. It does not sandbox malicious Python code.
+- A static test rejects `httpx` imports outside `egress/`. This is a regression
+  guard, not runtime enforcement against raw sockets, another HTTP library or
+  modified source. A firewall/WFP/VPN-style boundary would be needed for that.
+- No TLS interception, certificate substitution, HTTPS body inspection or
+  OS-wide capture. ECH can hide the inner SNI; matching visible SNI does not prove
+  the encrypted HTTP Host matches, and cannot prevent all domain-fronting schemes.
+- **Browser support is partial.** Chrome/Edge launches receive `--proxy-server`,
+  an isolated profile, disabled QUIC and disabled implicit loopback bypass. The
+  launch arguments/policy are tested with mocked OS calls, not verified page loads.
+  Browser authentication is not automatically provisioned: the protected proxy
+  returns 407 unless the browser supplies the per-run credentials. Unattended
+  YouTube navigation through this proxy is therefore not a completed capability.
+  Other browsers are unsupported; existing instances or managed policies may
+  ignore launch flags. YouTube subresources may also need separately reviewed
+  allowlist entries. Do not solve these limitations by disabling authentication.
+- The proxy is run-scoped. Interactive live-browser runs can keep it alive until
+  shutdown; one-shot CLI exit closes it, so a launched browser cannot keep using
+  that endpoint afterward. Existing browser traffic is not captured retroactively.
+- Hash chaining detects edits/reordering that invalidate the chain, but without
+  an externally stored signed head it cannot detect suffix deletion or an attacker
+  recomputing the entire chain. It is not an immutable audit ledger.
+- Pattern DLP is not document classification, OCR or comprehensive exfiltration
+  prevention. Local endpoints and operator-owned profiles are trusted configuration.
+  Simulated email does not implement real outbound delivery.
+
+Keep experiments on local fixtures and test accounts. Payments, CAPTCHAs and
+security bypasses remain outside project scope.
+
+#### Measured verification — 7 October 2026
+
+Actual output from this implementation session:
+
+```text
+python -m pytest -q
+144 passed in 7.64s
+
+Red team:
+attacks_passed: 14 / 14
+block_cases_passed: 11 / 11
+block_rate_percent: 100.0
+false_positive_rate_percent: 0.0
+legitimate_total: 4
+
+TLS benchmark:
+samples: 50
+warmup_pairs: 3
+direct_p50_ms: 6.361
+direct_p95_ms: 6.972
+proxy_p50_ms: 9.023
+proxy_p95_ms: 9.895
+added_p50_ms: 2.699
+added_p95_ms: 3.582
+payload_bytes: 4194304
+throughput_MB_s: 75.268
+```
+
+Machine: HP, Windows 11 build 26200, Python 3.13.2, Intel64 Family 6 Model 170
+Stepping 4, 18 logical CPUs. The benchmark uses IPv4 loopback TLS, fresh connections,
+three warm-up pairs, then 50 paired direct/proxy samples with alternating order.
+Added percentiles are computed from paired differences, not by subtracting the
+two marginal percentiles. The single 4 MiB throughput check includes connection
+setup; it is a sanity check, not sustained capacity. DLP and internet/provider
+latency are excluded. A preliminary localhost-name run was discarded because
+IPv6 fallback penalized only the direct path; both final paths use the same IPv4
+address. Numbers are machine/run-specific, not a production performance guarantee.
+
+Raw samples and complete scenario output are committed in
+`benchmark/egress-measurements.json` and `benchmark/egress-redteam.json`.
+The tests use fake DNS and loopback HTTP/TLS servers with temporary test certificates;
+they do not send secrets or requests to real providers. Existing baseline tests
+remain included, with mocked provider/desktop fixtures isolated from real egress.
+
+| Case | Check / observed outcome |
+|---|---|
+| A1–A2 | Synthetic AWS key and checksum-valid card blocked for cloud prompts |
+| A3 | Cloud email redacted under explicitly enabled strict-low configuration |
+| A4 | Unknown public host denied |
+| A5 | Host resolving to loopback/private ranges denied |
+| A6 | Metadata IP literal denied |
+| A7 | Public answer pinned; later private DNS answer denied |
+| A8–A9 | Raw IP and remote HTTP denied |
+| A10 | Real loopback CONNECT with mismatched ClientHello SNI closed and logged |
+| A11–A12 | Unapproved punycode and nonstandard port denied |
+| A13 | Real proxy rejects missing authentication with 407 |
+| A14 | Static HTTP-client bypass guard detects a prohibited import |
+| L1–L4 | Local prompt, clean cloud prompt, YouTube URL and invalid-checksum numbers allowed |
+
+The 100% rate is **11/11 blocking scenarios**, not 14 blocked requests: A3 is
+redaction, A7 is pinning, and A14 is a static check. Most red-team scenarios are
+policy/DLP unit evaluations; A10/A13 exercise real proxy sockets. Four legitimate
+fixtures are too small to estimate a real-world false-positive rate.
+
+#### Resume wording
+
+- Built an asyncio HTTP/CONNECT egress proxy with DNS pinning and visible-SNI checks, measuring 3.582 ms p95 added loopback TLS latency.
+- Implemented pre-encryption prompt DLP with checksum-validated card/Aadhaar detection, typed redaction, and destination-specific policies for local and cloud model calls.
+- Passed 14 security scenarios, including 11/11 blocking cases and zero false positives across four legitimate fixtures; added hash-chained connection auditing.
+
+Stack: Python, asyncio, TLS/SNI, TCP sockets, httpx, Ollama, FastAPI, pytest.
+
+#### Interview guide
+
+| Topic | Explain using this implementation |
+|---|---|
+| Forward vs reverse proxy | This is client-side outbound mediation; a reverse proxy fronts inbound server traffic. |
+| CONNECT | The client requests a host/port tunnel. After 200, TLS bytes replace HTTP proxy framing. |
+| TLS and SNI | Parse the visible ClientHello without decrypting application data. Missing SNI and ECH limit what is observable. |
+| SNI comparison | Reject visible SNI differing from CONNECT authority; do not claim inspection of encrypted HTTP Host. |
+| DNS/private addresses | An innocent hostname can resolve internally. Validate every returned address before connecting to prevent private-network SSRF. |
+| Rebinding | Connect to the validated numeric IP. A changed later DNS result cannot change that socket's target. |
+| Endpoint DLP | Scan JSON while plaintext exists inside the client, then let httpx perform ordinary end-to-end TLS. |
+| Checksums | Luhn doubles alternating card digits and sums decimal digits; Verhoeff uses permutation/multiplication tables. Neither proves a number is issued or real. |
+| Zero Trust vs VPN | Default-deny, per-connection policy is different from encrypted network transport; a VPN can coexist with Zero Trust controls. |
+| asyncio | Stream readers/writers share an event loop; paired relay tasks, drain backpressure and timeouts bound resources. A dedicated thread keeps synchronous approvals from freezing it. |
+| Hash chains | Each canonical record includes the prior digest; verification recomputes it. An external trusted head is needed to detect truncation or full rewrites. |
+| Existing safety | Action approvals, process allowlists, confined paths and independent postcondition verification govern execution; egress adds destination/data checks. |
+
+**1. Without HTTPS decryption, how do you stop leaks?** Destination enforcement uses
+CONNECT authority, DNS/IP/port and visible SNI. Endpoint DLP inspects model JSON
+before TLS. This does not inspect arbitrary browser traffic or guarantee all secrets
+are detected; the two layers have separate, limited responsibilities.
+
+**2. Why check IPs after DNS?** A public-looking allowed name can return a private
+address, including cloud metadata/link-local addresses. All answers must be safe,
+and the selected address is pinned. Checking only the hostname misses that attack.
+
+**3. How could someone bypass it?** Modified code could use raw sockets or another
+library; a browser could ignore its flag. The import guard catches accidental httpx
+regressions, `trust_env=False` ignores system proxy configuration, and the token
+restricts proxy use. None is an OS sandbox; stronger enforcement needs a network
+boundary outside the agent process.
+
+**4. Walk through an OpenAI request.** The client prechecks the URL and scans JSON.
+httpx connects to loopback and sends CONNECT plus Proxy-Authorization. The proxy
+authenticates, validates DNS and policy, returns 200 and buffers ClientHello. It
+compares visible SNI, opens the pinned IP on port 443, forwards the buffered bytes
+and relays the remaining handshake/application data. httpx validates the upstream
+certificate end-to-end. Byte counts and the outcome are logged on connection close;
+the earlier DLP decision has its own request record.
+
+**5. How does this relate to a VPN or Zscaler?** A VPN provides an encrypted transport
+path; this prototype adds application-specific destination policy and endpoint DLP.
+It demonstrates forward-proxy and least-privilege concepts, not equivalence to an
+enterprise security platform. It lacks fleet identity, managed-device enforcement,
+enterprise TLS inspection and production-scale operations.
