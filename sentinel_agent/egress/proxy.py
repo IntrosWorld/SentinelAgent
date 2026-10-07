@@ -183,13 +183,19 @@ class EgressProxy:
             if not established:
                 await self._error(writer, 502, "connection-error")
         finally:
-            for stream in (upstream, writer):
-                if stream:
-                    stream.close()
-                    with suppress(OSError, TimeoutError):
-                        await asyncio.wait_for(stream.wait_closed(), 1)
-            event["duration_ms"] = round((time.perf_counter() - started) * 1000, 3)
-            self.audit.write(**event)
+            try:
+                for stream in (upstream, writer):
+                    if stream:
+                        stream.close()
+                for stream in (upstream, writer):
+                    if stream:
+                        with suppress(OSError, TimeoutError):
+                            await asyncio.wait_for(stream.wait_closed(), 1)
+            finally:
+                # Shutdown can cancel wait_closed after a response has arrived.
+                # Recording must survive that cancellation as well.
+                event["duration_ms"] = round((time.perf_counter() - started) * 1000, 3)
+                self.audit.write(**event)
 
     async def _error(self, writer, status, rule):
         phrase = {403: "Forbidden", 407: "Proxy Authentication Required"}.get(status, "Request Failed")

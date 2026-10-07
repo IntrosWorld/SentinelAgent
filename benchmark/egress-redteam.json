@@ -1,0 +1,120 @@
+{
+  "attacks_passed": 14,
+  "attacks_total": 14,
+  "block_cases_passed": 11,
+  "block_cases_total": 11,
+  "block_rate_percent": 100.0,
+  "false_positive_rate_percent": 0.0,
+  "legitimate_total": 4,
+  "scenarios": [
+    {
+      "id": "A1",
+      "expected": "block",
+      "actual": "block",
+      "passed": true
+    },
+    {
+      "id": "A2",
+      "expected": "block",
+      "actual": "block",
+      "passed": true
+    },
+    {
+      "id": "A3",
+      "expected": "redact",
+      "actual": "redact",
+      "passed": true
+    },
+    {
+      "id": "A4",
+      "expected": "not-allowlisted",
+      "actual": "not-allowlisted",
+      "passed": true
+    },
+    {
+      "id": "A5",
+      "expected": "private-ip",
+      "actual": "private-ip",
+      "passed": true
+    },
+    {
+      "id": "A6",
+      "expected": "ip-literal",
+      "actual": "ip-literal",
+      "passed": true
+    },
+    {
+      "id": "A7",
+      "expected": "pin-public-or-block",
+      "actual": "pin-public-or-block",
+      "passed": true
+    },
+    {
+      "id": "A8",
+      "expected": "ip-literal",
+      "actual": "ip-literal",
+      "passed": true
+    },
+    {
+      "id": "A9",
+      "expected": "tls-required",
+      "actual": "tls-required",
+      "passed": true
+    },
+    {
+      "id": "A10",
+      "expected": "sni-mismatch",
+      "actual": "sni-mismatch",
+      "passed": true
+    },
+    {
+      "id": "A11",
+      "expected": "suspicious-host",
+      "actual": "suspicious-host",
+      "passed": true
+    },
+    {
+      "id": "A12",
+      "expected": "port",
+      "actual": "port",
+      "passed": true
+    },
+    {
+      "id": "A13",
+      "expected": "407",
+      "actual": "407",
+      "passed": true
+    },
+    {
+      "id": "A14",
+      "expected": "static-guard",
+      "actual": "static-guard",
+      "passed": true
+    },
+    {
+      "id": "L1",
+      "expected": "allow",
+      "actual": "allow",
+      "passed": true
+    },
+    {
+      "id": "L2",
+      "expected": "allow",
+      "actual": "allow",
+      "passed": true
+    },
+    {
+      "id": "L3",
+      "expected": "allow",
+      "actual": "allow",
+      "passed": true
+    },
+    {
+      "id": "L4",
+      "expected": "allow",
+      "actual": "allow",
+      "passed": true
+    }
+  ],
+  "scope": "Offline unit policy/DLP checks plus real loopback SNI/auth checks; A3 uses cloud_low=redact"
+}

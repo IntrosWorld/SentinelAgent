@@ -39,6 +39,7 @@ class AuditLog:
         self.path = root / f"{run_id}.jsonl"
         existing = read_verified(self.path) if self.path.exists() else []
         self.previous = existing[-1]["hash"] if existing else "0" * 64
+        self.path.touch(exist_ok=True)
 
     def write(self, **fields):
         # Callers supply only connection metadata and value-free DLP summaries.
