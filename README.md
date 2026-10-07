@@ -148,7 +148,8 @@ Produce the reproducible benchmark, ablation study, architecture documentation, 
 The gateway defaults on for agent-owned model HTTP calls. It combines endpoint
 prompt inspection with an authenticated loopback forward proxy. This is an
 application-scoped research control, **not an OS firewall or a full DLP product**.
-Browser integration is partial; see its limitations below before a live demo.
+Managed Chrome/Edge sessions supply proxy credentials in memory through Playwright;
+see browser setup and verification limits below before a live demo.
 
 ```text
 LLM adapter -> EgressClient -> destination pre-check -> JSON DLP
@@ -161,8 +162,8 @@ LLM adapter -> EgressClient -> destination pre-check -> JSON DLP
                                     v
                           permitted model endpoint
 
-Desktop URL -> same policy + query DLP -> Chromium/Edge proxy flag
-                                        (authentication limitation below)
+Desktop URL -> same policy + query DLP -> managed Chromium/Edge session
+                                        (authenticated proxy; isolated context)
 
 Client decisions + proxy connections -> per-run hash-chained JSONL
 ```
@@ -177,6 +178,7 @@ Client decisions + proxy connections -> per-run hash-chained JSONL
 | `sni.py` | Bounded TLS ClientHello parsing, including fragmented records |
 | `proxy.py` | Authenticated HTTP forwarding, CONNECT tunnels, limits and byte counters |
 | `client.py` | Model HTTP boundary and per-run gateway lifecycle on a dedicated event-loop thread |
+| `browser.py` | Managed Chrome/Edge lifecycle, in-memory proxy credentials and page-request policy |
 | `telemetry.py` | Canonical JSON, hash chaining, verification and summaries |
 | `lab.py`, `redteam.py`, `measure.py` | Offline TLS fixture, security scenarios and benchmark |
 
@@ -272,6 +274,23 @@ JSON-list setting `SENTINEL_EGRESS_APPROVED_SITES`. `--egress off` deliberately
 bypasses gateway policy/DLP for task execution; do not use it for security demos.
 Standalone model health checks use the configured default gateway mode.
 
+For managed browser actions, install `python -m pip install -e ".[browser,dev]"`.
+Chrome or Edge must already be installed at the allowlisted executable path.
+Playwright's supported proxy username/password options provide authentication
+without placing the token in a URL, process arguments or a generated extension.
+See the [Playwright proxy documentation](https://playwright.dev/python/docs/network#http-proxy).
+No personal browser profile is reused, and no trusted root certificate is installed.
+Missing browser dependencies fail the action; there is no unprotected fallback.
+
+```powershell
+sentinel-agent "Open Chrome, open YouTube, and search hello world" --no-model --live-desktop
+```
+
+An interactive terminal keeps the managed browser and proxy alive until Enter;
+interactive chat mode keeps sessions until `:quit`. JSON or redirected-stdin runs
+close sessions when the command exits. Managed browser windows close with the
+gateway; other applications and existing personal browser windows are untouched.
+
 The spec's DLP table allows low-severity cloud email, but its A3 scenario expects
 redaction. The default follows the table; A3 explicitly uses `cloud_low="redact"`.
 Set `SENTINEL_EGRESS_CLOUD_LOW=redact` to reproduce that stricter behavior in runs.
@@ -287,18 +306,23 @@ Set `SENTINEL_EGRESS_CLOUD_LOW=redact` to reproduce that stricter behavior in ru
 - No TLS interception, certificate substitution, HTTPS body inspection or
   OS-wide capture. ECH can hide the inner SNI; matching visible SNI does not prove
   the encrypted HTTP Host matches, and cannot prevent all domain-fronting schemes.
-- **Browser support is partial.** Chrome/Edge launches receive `--proxy-server`,
-  an isolated profile, disabled QUIC and disabled implicit loopback bypass. The
-  launch arguments/policy are tested with mocked OS calls, not verified page loads.
-  Browser authentication is not automatically provisioned: the protected proxy
-  returns 407 unless the browser supplies the per-run credentials. Unattended
-  YouTube navigation through this proxy is therefore not a completed capability.
-  Other browsers are unsupported; existing instances or managed policies may
-  ignore launch flags. YouTube subresources may also need separately reviewed
-  allowlist entries. Do not solve these limitations by disabling authentication.
-- The proxy is run-scoped. Interactive live-browser runs can keep it alive until
-  shutdown; one-shot CLI exit closes it, so a launched browser cannot keep using
-  that endpoint afterward. Existing browser traffic is not captured retroactively.
+- **Managed browser scope:** Chrome/Edge use a separate Playwright-owned process
+  and isolated context, authenticated proxy, disabled QUIC, disabled implicit
+  loopback bypass and non-proxied WebRTC UDP disabled. Service workers are blocked;
+  page requests are destination-checked as well as checked at the proxy. Other
+  browsers and personal/existing sessions are unsupported and not captured.
+  Enterprise policies can interfere. This remains application routing, not OS
+  enforcement. YouTube subresources can require separately reviewed allowlist
+  entries; the implementation does not silently allow all Google domains.
+- Navigation succeeds only after a successful document response and DOM readiness.
+  A YouTube action additionally waits for a visible video-result entry and rejects
+  an unexpected final URL. This does not prove video playback. Consent/CAPTCHA
+  pages or a zero-results search fail verification instead of reporting success.
+  Browser tests distinguish local authentication from an opt-in rendered YouTube
+  search test. No authentication dialog is clicked and proxy auth stays enabled.
+- The proxy and managed browsers are run-scoped and close together at shutdown.
+  Existing browser traffic is not captured retroactively. Arbitrary browser form
+  contents are not covered by endpoint prompt DLP; generated search text is.
 - Hash chaining detects edits/reordering that invalidate the chain, but without
   an externally stored signed head it cannot detect suffix deletion or an attacker
   recomputing the entire chain. It is not an immutable audit ledger.
@@ -372,6 +396,41 @@ The 100% rate is **11/11 blocking scenarios**, not 14 blocked requests: A3 is
 redaction, A7 is pinning, and A14 is a static check. Most red-team scenarios are
 policy/DLP unit evaluations; A10/A13 exercise real proxy sockets. Four legitimate
 fixtures are too small to estimate a real-world false-positive rate.
+
+#### Browser authentication follow-up — 7 October 2026
+
+Final default-suite output: `150 passed, 1 skipped in 44.24s`, with no warnings.
+The skipped test is the explicitly opt-in public YouTube smoke test below.
+
+Real headless Chrome and Edge loaded a local HTML document through the authenticated
+proxy. Tests verified HTTP 200, the rendered page title, a matching allowed proxy
+connection, no Proxy-Authorization header at the destination, no token in audit
+logs, private-IP rejection and shutdown. Unit coverage checks in-memory credential
+configuration, session reuse, result readiness, sanitized errors and CLI lifetime.
+The browser extra is optional: local browser integration tests skip if its runtime
+or the matching installed executable is missing.
+
+An opt-in public-network test runs the actual `open_app` and `youtube_search`
+desktop methods using headless Chrome. It checks HTTP 200, the final search URL,
+the YouTube title, visible video-result entries and an allowed CONNECT audit record.
+The test passed (`1 passed, 3 deselected in 16.81s`). An earlier combined-suite run
+timed out on YouTube despite successful local authentication; its standalone rerun
+passed. Public-network timing and site changes remain possible failure modes, not
+reasons to disable policy or report an unverified success. Thumbnails, fonts and
+ads on non-allowlisted domains were blocked; video playback was not tested.
+
+```powershell
+python -m pytest tests/test_egress_browser.py -q
+# Optional: contacts YouTube with the non-sensitive query "hello world".
+$env:SENTINEL_LIVE_BROWSER_TEST = "1"
+python -m pytest tests/test_egress_browser.py -k youtube -q
+$env:SENTINEL_LIVE_BROWSER_TEST = "0"
+```
+
+These browser checks do not change the earlier proxy latency measurement. The
+proxy's expected initial 407 authentication challenges can appear in audit logs
+before the browser retries with credentials; they are not evidence of a failed
+navigation when the document and result checks subsequently pass.
 
 #### Resume wording
 

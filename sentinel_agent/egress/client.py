@@ -52,6 +52,7 @@ class EgressGateway:
         self.loop = None
         self.thread = None
         self.events = []
+        self.browser = None
 
     def start(self):
         if self.loop is not None:
@@ -78,8 +79,23 @@ class EgressGateway:
             raise EgressError("Gateway is not running")
         return asyncio.run_coroutine_threadsafe(coroutine, self.loop)
 
-    def call(self, coroutine):
-        return self.submit(coroutine).result(timeout=15)
+    def call(self, coroutine, timeout=15):
+        future = self.submit(coroutine)
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            future.cancel()
+            raise EgressError("Gateway operation timed out") from None
+
+    def open_browser(self, executable, url=None, *, headless=False, ready_selector=None):
+        if not self.enabled or self.proxy is None:
+            raise EgressError("Managed browser requires an active gateway")
+        async def open_session():
+            from sentinel_agent.egress.browser import ManagedBrowser
+            if self.browser is None:
+                self.browser = ManagedBrowser(self)
+            return await self.browser.open(executable, url, headless=headless, ready_selector=ready_selector)
+        return self.call(open_session(), timeout=60)
 
     async def check(self, url):
         return await asyncio.wrap_future(self.submit(self.policy.evaluate_url(url)))
@@ -107,9 +123,22 @@ class EgressGateway:
     def close(self):
         if self.loop is None:
             return
+        if self.browser:
+            with suppress(Exception):
+                self.call(self.browser.close(), timeout=20)
+            self.browser = None
         if self.proxy:
             with suppress(Exception):
                 self.call(self.proxy.close())
+        async def drain_tasks():
+            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await self.loop.shutdown_asyncgens()
+        with suppress(Exception):
+            self.call(drain_tasks(), timeout=5)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.thread.join(timeout=5)
         self.loop.close()

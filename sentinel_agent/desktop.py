@@ -84,14 +84,13 @@ class DesktopEnvironment(CollegePortalEnvironment):
             raise RuntimeError(f"Application executable was not found: {path}")
         return path
 
-    def _launch(self, command: list[str]) -> None:
+    def _launch(self, command: list[str], *, ready_selector=None) -> None:
         if self.live_desktop:
             if self.gateway and self.gateway.enabled and command[0].lower().endswith(("chrome.exe", "msedge.exe")):
-                # Keep URL at index 1; browser arguments apply to the isolated run profile.
-                profile = Path.cwd() / "artifacts" / "egress" / "browser" / self.gateway.audit.run_id
-                command += [f"--proxy-server=http://127.0.0.1:{self.gateway.proxy.port}",
-                            f"--user-data-dir={profile}", "--disable-quic", "--no-first-run",
-                            "--proxy-bypass-list=<-loopback>"]
+                self.state["browser_navigation"] = self.gateway.open_browser(
+                    command[0], command[1] if len(command) > 1 else None,
+                    ready_selector=ready_selector)
+                return
             subprocess.Popen(command)
 
     def _action_open_app(self, arguments: dict[str, Any]) -> str:
@@ -139,7 +138,10 @@ class DesktopEnvironment(CollegePortalEnvironment):
                 raise EgressBlocked("dlp")
             query = result.body
             url = "https://www.youtube.com/results?" + urlencode({"search_query": query})
-        self._launch([str(chrome), url])
+        self._launch([str(chrome), url], ready_selector="ytd-video-renderer")
+        if self.live_desktop and self.gateway and self.gateway.enabled:
+            if self.state["browser_navigation"]["url"] != url:
+                raise EgressBlocked("browser-unexpected-redirect")
         self.state.update(
             {"last_opened_app": "chrome", "last_search": query, "last_url": url}
         )

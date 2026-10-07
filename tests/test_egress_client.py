@@ -99,22 +99,20 @@ async def test_run_records_dlp_failure_in_trace(tmp_path):
         agent.close()
 
 
-async def test_browser_approval_is_per_run_and_launch_has_proxy_flags(tmp_path):
+async def test_browser_approval_is_per_run_and_launch_uses_managed_session(tmp_path):
     async def resolver(host, port):
         return ["8.8.8.8"]
     factory = lambda run_id, **kw: EgressGateway(run_id, policy=DestinationPolicy(EgressConfig(approved_sites=frozenset()), resolver), audit_root=tmp_path, port=0, **kw)
     agent = SentinelAgent(HybridPlanner(OllamaPlanner("http://127.0.0.1:1", "unused")), gateway_factory=factory)
     try:
-        with patch("sentinel_agent.desktop.subprocess.Popen") as launch:
+        with patch.object(EgressGateway, "open_browser", side_effect=lambda executable, url, **kwargs: {"url": url, "title": "YouTube", "status": 200}) as launch:
             run = await agent.start("YouTube search hello world", False, live_desktop=True)
             assert run.status == RunStatus.WAITING_APPROVAL
             assert not launch.called
             run = agent.approve(run.id, True)
             assert run.status == RunStatus.COMPLETED
-            flags = launch.call_args.args[0]
-            assert any(flag.startswith("--proxy-server=http://127.0.0.1:") for flag in flags)
-            assert "--disable-quic" in flags
-            assert agent.gateways[run.id].proxy.token not in " ".join(flags)
+            assert launch.call_args.args[1] == "https://www.youtube.com/results?search_query=hello+world"
+            assert agent.gateways[run.id].proxy.token not in str(launch.call_args)
             another = await agent.start("YouTube search hello world", False, live_desktop=True)
             assert another.status == RunStatus.WAITING_APPROVAL
             assert agent.approve(another.id, False).status == RunStatus.FAILED

@@ -254,6 +254,12 @@ async def async_main(args: argparse.Namespace) -> int:
     try:
         if args.task:
             run = await execute(agent, args.task, not args.no_model, args.disturbance, args.live_desktop, args.json)
+            gateway = agent.gateways.get(run.id)
+            if not args.json and sys.stdin.isatty() and gateway and gateway.browser:
+                try:
+                    input("  Browser session is active. Press Enter to close it and exit. ")
+                except (EOFError, KeyboardInterrupt):
+                    pass
             return 0 if run.status == RunStatus.COMPLETED else 1
         await interactive(agent, model, registry, not args.no_model, args.live_desktop)
         return 0
