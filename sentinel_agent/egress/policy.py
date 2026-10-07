@@ -55,6 +55,15 @@ class DestinationPolicy:
     def __init__(self, config: EgressConfig, resolver: Resolver = resolve_host):
         self.config = config
         self.resolver = resolver
+        self._run_grants: set[tuple[str, int, str]] = set()
+
+    async def approve(self, host: str, port: int, scheme: str) -> bool:
+        """Only a user-approved unknown public destination may gain a run grant."""
+        decision = await self.evaluate(host, port, scheme)
+        if not decision.approval_required:
+            return False
+        self._run_grants.add((decision.host, port, scheme))
+        return True
 
     async def evaluate_url(self, url: str) -> DestinationDecision:
         try:
@@ -119,6 +128,8 @@ class DestinationPolicy:
             if host in self.config.provider_hosts:
                 category = "model-provider"
             elif host in self.config.approved_sites:
+                category = "approved-site"
+            elif (host, port, scheme) in self._run_grants:
                 category = "approved-site"
             else:
                 return deny("not-allowlisted", "Destination requires approval for this run", ips, approval=True)

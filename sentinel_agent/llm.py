@@ -3,7 +3,7 @@ import os
 import re
 from typing import Any, Protocol
 
-import httpx
+from sentinel_agent.egress.client import EgressClient, EgressError
 
 from sentinel_agent.schemas import Plan
 from sentinel_agent.models import ModelProfile
@@ -65,12 +65,11 @@ class OllamaPlanner:
 
     async def health(self) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with EgressClient(timeout=5) as client:
                 response = await client.get(f"{self.base_url}/api/tags")
-                response.raise_for_status()
                 names = [m["name"] for m in response.json().get("models", [])]
             return {"online": True, "model": self.model, "installed": self.model in names, "models": names}
-        except (httpx.HTTPError, KeyError) as exc:
+        except (EgressError, KeyError) as exc:
             return {"online": False, "model": self.model, "installed": False, "error": str(exc)}
 
     async def create_plan(
@@ -86,10 +85,9 @@ class OllamaPlanner:
             "options": {"temperature": 0.1, "num_ctx": 4096, "num_predict": 700},
         }
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with EgressClient(timeout=self.timeout) as client:
                 response = await client.post(f"{self.base_url}/api/generate", json=payload)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except EgressError as exc:
             raise ModelUnavailable(f"Cannot reach Ollama at {self.base_url}: {exc}") from exc
 
         try:
@@ -131,11 +129,10 @@ class ProviderPlanner:
         }
         try:
             headers = self._headers()
-            async with httpx.AsyncClient(timeout=min(self.profile.timeout, 10)) as client:
+            async with EgressClient(timeout=min(self.profile.timeout, 10)) as client:
                 if self.profile.provider in {"ollama", "openai_compatible"}:
                     url = f"{base}/models" if self.profile.provider == "openai_compatible" else f"{base}/api/tags"
                     response = await client.get(url, headers=headers)
-                    response.raise_for_status()
                     data = response.json()
                     raw_models = data.get("data", []) if self.profile.provider == "openai_compatible" else data.get("models", [])
                     names = [item.get("id") or item.get("name") for item in raw_models]
@@ -143,7 +140,7 @@ class ProviderPlanner:
                 else:
                     # Avoid a billable generation for cloud health checks; valid configuration is ready.
                     result.update(online=True, installed=True, configured=True)
-        except (httpx.HTTPError, KeyError, ModelUnavailable, ValueError) as exc:
+        except (EgressError, KeyError, ModelUnavailable, ValueError) as exc:
             result["error"] = str(exc)
         return result
 
@@ -178,9 +175,8 @@ class ProviderPlanner:
         else:
             raise ModelUnavailable(f"Unsupported provider: {provider}")
         try:
-            async with httpx.AsyncClient(timeout=self.profile.timeout) as client:
+            async with EgressClient(timeout=self.profile.timeout) as client:
                 response = await client.post(url, headers=self._headers(), json=payload)
-                response.raise_for_status()
             body = response.json()
             if provider == "openai_compatible":
                 text = body["choices"][0]["message"]["content"]
@@ -189,7 +185,7 @@ class ProviderPlanner:
             else:
                 text = body["candidates"][0]["content"]["parts"][0]["text"]
             return Plan.model_validate(_extract_json(text))
-        except (httpx.HTTPError, KeyError, StopIteration, ValueError, json.JSONDecodeError) as exc:
+        except (EgressError, KeyError, StopIteration, ValueError, json.JSONDecodeError) as exc:
             raise ModelUnavailable(
                 f"{self.profile.name} could not create a valid plan: {exc}"
             ) from exc

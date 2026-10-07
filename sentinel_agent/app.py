@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -14,7 +15,15 @@ settings = get_settings()
 registry = ModelRegistry(settings.models_file)
 model = planner_from_profile(registry.get())
 agent = SentinelAgent(HybridPlanner(model), settings.max_steps)
-app = FastAPI(title="SentinelAgent", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        yield
+    finally:
+        agent.close()
+
+
+app = FastAPI(title="SentinelAgent", version="0.1.0", lifespan=lifespan)
 static_dir = Path(__file__).parent / "static"
 
 

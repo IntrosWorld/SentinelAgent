@@ -24,6 +24,7 @@ async def evaluate(use_model: bool) -> dict:
         expected = task.get("expected_status", RunStatus.COMPLETED)
         results.append({"id": task["id"], "passed": run.status == expected, "status": run.status, "expected": expected})
     passed = sum(result["passed"] for result in results)
+    agent.close()
     return {"passed": passed, "total": len(results), "success_rate": passed / len(results), "results": results}
 
 

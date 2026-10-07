@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 from contextlib import suppress
 
 from sentinel_agent.agent import SentinelAgent
@@ -12,6 +13,7 @@ from sentinel_agent.llm import PlannerModel, planner_from_profile
 from sentinel_agent.models import ModelProfile, ModelRegistry
 from sentinel_agent.planner import HybridPlanner
 from sentinel_agent.schemas import AgentRun, RunStatus
+from sentinel_agent.egress.telemetry import AuditLog, read_verified, report
 
 
 class Style:
@@ -52,12 +54,12 @@ async def spinner(task: asyncio.Task, label: str) -> None:
     print("\r" + " " * (len(label) + 8) + "\r", end="", flush=True)
 
 
-def make_agent(profile_name: str | None = None) -> tuple[SentinelAgent, PlannerModel, ModelRegistry]:
+def make_agent(profile_name: str | None = None, egress_enabled=None) -> tuple[SentinelAgent, PlannerModel, ModelRegistry]:
     settings = get_settings()
     registry = ModelRegistry(settings.models_file)
     profile = registry.get(profile_name)
     model = planner_from_profile(profile)
-    return SentinelAgent(HybridPlanner(model), settings.max_steps), model, registry
+    return SentinelAgent(HybridPlanner(model), settings.max_steps, egress_enabled=egress_enabled), model, registry
 
 
 def show_health(health: dict) -> None:
@@ -86,7 +88,7 @@ def show_plan(run: AgentRun) -> None:
 def show_trace(run: AgentRun) -> None:
     print(f"\n  {paint('VERIFIED TRACE', Style.BOLD, Style.CYAN)}")
     for event in run.events:
-        if event.kind not in {"action", "approval", "complete"}:
+        if event.kind not in {"action", "approval", "complete", "egress"}:
             continue
         verified = event.data.get("verified")
         symbol = paint("OK", Style.LIME) if verified or event.kind == "complete" else paint("-", Style.YELLOW)
@@ -110,6 +112,8 @@ def show_result(run: AgentRun) -> None:
         print("\n" + "\n".join(f"  {line}" for line in run.result["report"].splitlines()))
     if run.result.get("error"):
         print(f"  {paint(run.result['error'], Style.RED)}")
+    if run.result.get("egress_log"):
+        print(f"  Egress audit: {run.result['egress_log']}")
     if run.result.get("active_window_title"):
         print(f"  Window: {run.result['active_window_title']}")
     controls = run.result.get("observed_controls")
@@ -211,7 +215,8 @@ async def interactive(
                 name = argument.removeprefix("use ").strip()
                 try:
                     registry.use(name)
-                    agent, model, registry = make_agent(name)
+                    model = planner_from_profile(registry.get(name))
+                    agent.planner.model = model
                     print(f"  Active model profile: {name}")
                     show_health(await model.health())
                 except KeyError as exc:
@@ -238,24 +243,22 @@ async def interactive(
 
 async def async_main(args: argparse.Namespace) -> int:
     try:
-        agent, model, registry = make_agent(getattr(args, "model_profile", None))
+        mode = getattr(args, "egress", None)
+        enabled = None if mode is None else mode == "on"
+        agent, model, registry = make_agent(getattr(args, "model_profile", None), enabled)
     except KeyError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     if not args.json:
         banner()
-    if args.task:
-        run = await execute(
-            agent,
-            args.task,
-            not args.no_model,
-            args.disturbance,
-            args.live_desktop,
-            args.json,
-        )
-        return 0 if run.status == RunStatus.COMPLETED else 1
-    await interactive(agent, model, registry, not args.no_model, args.live_desktop)
-    return 0
+    try:
+        if args.task:
+            run = await execute(agent, args.task, not args.no_model, args.disturbance, args.live_desktop, args.json)
+            return 0 if run.status == RunStatus.COMPLETED else 1
+        await interactive(agent, model, registry, not args.no_model, args.live_desktop)
+        return 0
+    finally:
+        agent.close()
 
 
 def show_models(registry: ModelRegistry) -> None:
@@ -308,6 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Offline-first, safety-aware computer agent")
     parser.add_argument("task", nargs="?", help="Task to execute; omit for interactive mode")
     parser.add_argument("--no-model", action="store_true", help="Use the fast deterministic planner")
+    parser.add_argument("--egress", choices=["on", "off"], default=None, help="Gateway mode (default on; off bypasses network policy and DLP)")
     parser.add_argument("--model-profile", help="Use this profile for the current run")
     parser.add_argument("--disturbance", choices=["popup"], help="Inject a benchmark disturbance")
     parser.add_argument("--json", action="store_true", help="Machine-readable, non-interactive output")
@@ -339,6 +343,31 @@ def build_models_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     with suppress(KeyboardInterrupt):
+        if len(sys.argv) > 1 and sys.argv[1] == "egress":
+            parser = argparse.ArgumentParser(prog="sentinel-agent egress")
+            parser.add_argument("command", choices=["status", "report", "verify"])
+            parser.add_argument("run_id", nargs="?")
+            args = parser.parse_args(sys.argv[2:])
+            if args.command == "status":
+                settings = get_settings()
+                print(json.dumps({"enabled_by_default": settings.egress_enabled,
+                                  "bind": "127.0.0.1", "port": settings.egress_port,
+                                  "lifecycle": "one proxy per agent run; status shows configuration",
+                                  "cloud_low": settings.egress_cloud_low}, indent=2))
+                return
+            if not args.run_id:
+                parser.error("run_id is required")
+            try:
+                import re
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", args.run_id):
+                    raise ValueError("Invalid run ID")
+                path = Path("artifacts/egress") / f"{args.run_id}.jsonl"
+                result = report(path) if args.command == "report" else {"valid": True, "records": len(read_verified(path))}
+                print(json.dumps(result, indent=2))
+            except (ValueError, OSError) as exc:
+                print(f"Audit verification failed: {type(exc).__name__}", file=sys.stderr)
+                raise SystemExit(1)
+            return
         if len(sys.argv) > 1 and sys.argv[1] == "models":
             args = build_models_parser().parse_args(sys.argv[2:])
             raise SystemExit(asyncio.run(manage_models(args)))

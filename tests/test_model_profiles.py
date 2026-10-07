@@ -5,6 +5,7 @@ import pytest
 
 from sentinel_agent.llm import ProviderPlanner
 from sentinel_agent.models import ModelProfile, ModelRegistry
+from sentinel_agent.egress.client import EgressGateway
 
 
 def test_registry_switches_profiles_without_storing_secrets(tmp_path, monkeypatch):
@@ -24,7 +25,7 @@ def test_registry_switches_profiles_without_storing_secrets(tmp_path, monkeypatc
     ("anthropic", {"content": [{"type": "text", "text": '{"goal":"demo","actions":[]}'}]}),
     ("gemini", {"candidates": [{"content": {"parts": [{"text": '{"goal":"demo","actions":[]}'}]}}]}),
 ])
-async def test_provider_adapters_parse_plans(monkeypatch, provider, response_body):
+async def test_provider_adapters_parse_plans(monkeypatch, tmp_path, provider, response_body):
     seen = {}
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
@@ -34,7 +35,13 @@ async def test_provider_adapters_parse_plans(monkeypatch, provider, response_bod
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
     base_url = "https://example.test/v1" if provider != "anthropic" else "https://example.test"
     profile = ModelProfile(name="test", provider=provider, model="model-id", base_url=base_url)
-    plan = await ProviderPlanner(profile).create_plan("demo", {}, {})
+    # Only test wire-format parsing here; gateway integration tests cover policy.
+    gateway = EgressGateway(enabled=False, audit_root=tmp_path).start()
+    try:
+        with gateway.activate():
+            plan = await ProviderPlanner(profile).create_plan("demo", {}, {})
+    finally:
+        gateway.close()
     assert plan.goal == "demo"
     assert plan.actions == []
     if provider != "gemini":

@@ -9,7 +9,8 @@ from sentinel_agent.schemas import RunStatus
 
 
 def build_agent() -> SentinelAgent:
-    return SentinelAgent(HybridPlanner(OllamaPlanner("http://127.0.0.1:1", "unused")))
+    # Launch contract tests mock the OS; gateway behavior has separate offline tests.
+    return SentinelAgent(HybridPlanner(OllamaPlanner("http://127.0.0.1:1", "unused")), egress_enabled=False)
 
 
 @pytest.mark.asyncio

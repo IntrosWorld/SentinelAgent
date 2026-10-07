@@ -9,6 +9,7 @@ from uuid import uuid4
 from sentinel_agent.environment import CollegePortalEnvironment
 from sentinel_agent.office_files import OfficeFileManager
 from sentinel_agent.windows_control import WindowsController
+from sentinel_agent.egress.client import EgressBlocked
 
 
 class DesktopEnvironment(CollegePortalEnvironment):
@@ -41,9 +42,10 @@ class DesktopEnvironment(CollegePortalEnvironment):
         "calculator": Path(r"C:\Windows\System32\calc.exe"),
     }
 
-    def __init__(self, disturbance: str | None = None, live_desktop: bool = False):
+    def __init__(self, disturbance: str | None = None, live_desktop: bool = False, gateway=None):
         super().__init__(disturbance)
         self.live_desktop = live_desktop
+        self.gateway = gateway
         self.state.update(
             {
                 "desktop_mode": "live" if live_desktop else "simulated",
@@ -84,6 +86,12 @@ class DesktopEnvironment(CollegePortalEnvironment):
 
     def _launch(self, command: list[str]) -> None:
         if self.live_desktop:
+            if self.gateway and self.gateway.enabled and command[0].lower().endswith(("chrome.exe", "msedge.exe")):
+                # Keep URL at index 1; browser arguments apply to the isolated run profile.
+                profile = Path.cwd() / "artifacts" / "egress" / "browser" / self.gateway.audit.run_id
+                command += [f"--proxy-server=http://127.0.0.1:{self.gateway.proxy.port}",
+                            f"--user-data-dir={profile}", "--disable-quic", "--no-first-run",
+                            "--proxy-bypass-list=<-loopback>"]
             subprocess.Popen(command)
 
     def _action_open_app(self, arguments: dict[str, Any]) -> str:
@@ -118,6 +126,19 @@ class DesktopEnvironment(CollegePortalEnvironment):
             raise RuntimeError("YouTube search requires a non-empty query")
         chrome = self._resolve_app("chrome")
         url = "https://www.youtube.com/results?" + urlencode({"search_query": query})
+        if self.live_desktop and self.gateway and self.gateway.enabled:
+            decision = self.gateway.check_sync(url)
+            if not decision.allowed:
+                raise EgressBlocked(decision.rule)
+            # Search text is also outbound data; inspect before placing it in a URL.
+            result = self.gateway.scanner.protect(query, "approved-site")
+            self.gateway.record(kind="request", method="BROWSER", host=decision.host,
+                                port=decision.port, decision="allow" if result.allowed else "block",
+                                rule="dlp", dlp=result.summary())
+            if not result.allowed:
+                raise EgressBlocked("dlp")
+            query = result.body
+            url = "https://www.youtube.com/results?" + urlencode({"search_query": query})
         self._launch([str(chrome), url])
         self.state.update(
             {"last_opened_app": "chrome", "last_search": query, "last_url": url}
