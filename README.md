@@ -2,11 +2,11 @@
 
 An offline-first, safety-aware computer-use agent research MVP. It can use Ollama, OpenAI-compatible servers, OpenAI, Anthropic or Gemini for constrained planning while deterministic code owns policy decisions, execution and postcondition verification.
 
-## Why an 8B model is enough
+## Where a local 7B/8B model fits
 
 The model does **not** receive unlimited control of the computer. It selects from a small action vocabulary and returns a typed plan. DOM/accessibility data, OCR and explicit tool results provide observations; deterministic policy and verification code decide whether actions are allowed and successful. This makes a quantized 7B/8B model viable for a focused domain.
 
-This workspace defaults to the already-installed `qwen2.5-coder:7b` (7.6B parameters, Q4_K_M, about 4.8 GB). It is enough for the constrained planner, although it runs at 100% CPU on the detected machine. For a later quality upgrade, try `qwen3:8b-q4_K_M` (about 5.2 GB); for speed, use `qwen3:4b-q4_K_M`. Add `qwen3-vl:2b` only for screenshots where DOM/OCR cannot identify the target.
+This workspace defaults to the already-installed `qwen2.5-coder:7b` (7.6B parameters, Q4_K_M, about 4.8 GB). Parameter count alone does not establish reliable computer use. The general desktop experiment uses `qwen3-vl:2b-instruct` with optional local OCR, or current accessibility observations without images. On this machine, OCR-assisted 2B proposals passed three Calculator target checks; screenshot-only targeting still failed. See the measured results below before choosing a model or enabling native input.
 
 ## Quick start (Windows PowerShell)
 
@@ -86,6 +86,15 @@ double-click, hover, drag, literal text entry, allowlisted keys, scroll and wait
 Targets are current observed IDs or screenshot-relative pixels, not generated
 shell commands or Python code.
 
+Model output coordinates and executor coordinates are separate. Official
+Qwen3-VL names automatically use the model's normalized `0..1000` convention;
+the adapter validates the response, converts each axis to window pixels, then
+checks bounds and sensitive targets again. Other models default to pixels.
+For a renamed model, explicitly set `--desktop-coordinates normalized_1000`
+or `--desktop-coordinates pixels` when adding its profile. Never reinterpret
+an old pixel-mode result as a normalized result. See the
+[Qwen3-VL coordinate specification](https://arxiv.org/html/2511.21631v1#S3.SS2.SSS4).
+
 Install the Windows dependencies, open a harmless scratch app, and select its
 window explicitly:
 
@@ -112,7 +121,22 @@ text model is unchanged. If you already have a saved registry, add a profile:
 sentinel-agent models add local-vision --provider ollama --model qwen3-vl:2b-instruct --base-url http://127.0.0.1:11434 --vision
 sentinel-agent desktop "Select the rectangle tool without drawing" --window-id 123456 --model-profile local-vision
 sentinel-agent desktop "Enter hello into the document" --window-id 123456 --model-profile local-ollama --no-vision --expect-text "hello"
+# Optional alternative: installed separately, never replaces the active text profile.
+ollama pull qwen3-vl:4b-instruct
+sentinel-agent models add local-vision-4b --provider ollama --model qwen3-vl:4b-instruct --base-url http://127.0.0.1:11434 --vision --timeout 180
+# Optional local OCR when labels are missing; Tesseract must already be on PATH.
+sentinel-agent desktop "Click the digit 7" --window-id 123456 --model-profile local-vision --ocr
 ```
+
+`--ocr` adds screenshot-derived word locations, not fabricated accessibility
+controls. It uses local Tesseract with generic grayscale/contrast processing,
+bounded upscaling and two text-segmentation passes. Word boxes are mapped back
+to the original screenshot, then expressed in the model's coordinate space.
+OCR cannot establish button roles, editability, safe actions or task completion;
+false/missing text is possible. Its input/output sizes and runtime are bounded;
+there is no download, remote OCR fallback or temporary screenshot file. Missing
+Tesseract fails closed. OCR requires vision mode and does not enable typing into
+unobserved controls. Screenshots sent to the model remain unchanged.
 
 `--vision` declares a model capability, not a performance guarantee. The model
 must actually be installed and accept images. Ollama, OpenAI-compatible,
@@ -124,6 +148,11 @@ does **not** inspect secrets inside images. Screenshots are not saved by the
 normal runner, and model/desktop errors do not echo pixel payloads. The egress
 gateway governs Sentinel's model requests, not all network traffic of native
 applications.
+
+Known Ollama cloud model tags also require observation opt-in even if Ollama is
+on localhost. This is not a proof that an arbitrary renamed local server/model
+never relays requests: use trusted local weights/runtime. Desktop requests grant
+only the selected canonical model endpoint, not every endpoint in the registry.
 
 The executor checks process identity, current controls, bounds, focus, DPI,
 occlusion and screenshot freshness. Known credential/security/terminal scopes
@@ -146,20 +175,33 @@ deadline. Generalization across **every** application is not claimed.
 Tests and read-only model probes:
 
 ```powershell
-python -m pytest tests/test_desktop_agent.py tests/test_desktop_planner.py tests/test_desktop_windows.py tests/test_desktop_cli.py -q
+python -m pytest tests/test_desktop_agent.py tests/test_desktop_planner.py tests/test_desktop_windows.py tests/test_desktop_cli.py tests/test_desktop_ocr.py tests/test_desktop_probe.py tests/test_model_profiles.py -q
 sentinel-agent desktop "Click the digit 7" --snapshot artifacts/desktop-probe/calculator-zero.json --propose-only --json
 python -m benchmark.desktop_probe artifacts/desktop-probe/calculator-zero.json "Click the digit 7 button." --model qwen3-vl:2b-instruct
+# Expected bounds are evaluator-only; the model never sees this ground truth.
+python -m benchmark.desktop_probe artifacts/desktop-probe/calculator-zero.json "Click the digit 7 button." --model qwen3-vl:2b-instruct --ocr --expect-box 4 320 80 370
+# Synthetic accessibility contract fixture, NOT a captured app or an end-to-end test.
+python -m benchmark.desktop_probe benchmark/fixtures/desktop-labels.json "Select the Rectangle tool." --no-vision --expect-element f520a86c
 ```
 
 Snapshots are local, user-supplied `DesktopSnapshot` JSON fixtures. `--snapshot`
 requires `--propose-only` and never constructs a desktop executor. The probe
 records model, snapshot hash, elapsed time and the proposed action separately
 from execution evidence. Never equate a valid proposal with a completed UI task.
+`--expect-box` and `--expect-element` check the requested `--expect-kind` (default
+`click`) separately from JSON validity. A wrong target exits nonzero. An empty
+accessibility fixture is rejected in `--no-vision` mode. `--coordinates` can
+override the model convention for comparisons; scored proposals always use
+window pixels. `--base-url` allows a separate loopback Ollama test server, with
+an exact per-run gateway grant. Known cloud tags are refused by this benchmark.
+`--output` exclusively creates an evidence file before inference, refusing an
+existing path without spending another model request. Keep private screenshots
+in ignored `artifacts/`; only the synthetic fixture is committed.
 Wire formats follow [Ollama vision](https://docs.ollama.com/capabilities/vision)
 and [structured output](https://docs.ollama.com/capabilities/structured-outputs)
 documentation.
 
-### Desktop test results (9 October 2026)
+### Initial desktop test results (9 October 2026, before coordinate/OCR changes)
 
 Full automated regression: **453 passed, 2 skipped in 75.48 seconds**.
 The skips are existing opt-in integration tests; no live model accuracy claim
@@ -192,11 +234,75 @@ The installed 4B tag advertises thinking support; it was tested with
 An Instruct profile is the lightweight default for further experiments, not a
 claim that 2B vision is sufficient. Larger/GUI-specialized models and richer
 accessibility targeting still need comparative testing. No models were
-downloaded and no cloud screenshot requests were made.
+downloaded during that initial experiment and no cloud screenshot requests were made.
 
 Local evidence is under `artifacts/desktop-probe/` (ignored by Git), including
 `calculator-strict-2b.json`, `calculator-strict-4b.json`, snapshots and earlier
 failed probes. Do not publish screenshot fixtures without reviewing them.
+
+### Coordinate and local OCR follow-up (9 October 2026)
+
+Full automated regression: **662 passed, 2 skipped in 50.32 seconds**. The
+skips are the opt-in public YouTube and installed local browser-model tests.
+This includes bounded OCR, coordinate conversion, model/profile compatibility,
+privacy guards, independent target scoring and cancellation evidence tests.
+Automated test counts are separate from the real-model proposal checks below.
+
+Machine: Intel Core Ultra 5 125H, approximately 15.43 GiB usable RAM, Intel Arc
+integrated graphics with shared system memory. Runtime: Ollama 0.13.5 and local
+Tesseract 5.4.0. The `qwen3-vl:4b-instruct` weights were downloaded for this
+comparison; existing models and the active text-model profile were preserved.
+Inference used loopback Ollama, not a cloud API.
+
+All Calculator probes below used the same real 322 x 534 screenshot. Targets
+were independently specified pixel rectangles, never supplied to the model.
+The model used normalized coordinates; results were scored after conversion
+to window pixels. Each row is a single run, not a throughput or reliability
+benchmark. No proposed click was executed.
+
+| Input / runtime | Requested target | Proposal / result | Seconds |
+| --- | --- | --- | --- |
+| 2B Instruct, screenshot only, CPU | Calculator 7 | (60, 171), wrong button | 35.87 |
+| 2B Instruct, screenshot only, Vulkan | Calculator 7 | (50, 176), wrong button | 29.17 |
+| 4B Instruct, screenshot only, Vulkan | Calculator 7 | (32, 160), wrong button | 31.33 |
+| 2B Instruct, screenshot + OCR, CPU | Calculator 7 | (37, 336), inside target | 66.59 |
+| 2B Instruct, screenshot + OCR, CPU | Calculator 5 | (116, 390), inside target | 49.20 |
+| 2B Instruct, screenshot + OCR, CPU | Calculator 3 | (195, 442), inside target | 48.49 |
+| 4B Instruct, screenshot + OCR, CPU | Calculator 7 | (37, 336), inside target | 136.50 |
+| 2B Instruct, synthetic labels only, CPU | Rectangle tool | Correct observed ID | 11.84 |
+| 2B Instruct, screenshot + OCR, Vulkan | Calculator 7 | Native inference runtime crashed; no action | 32.00 |
+| 4B Instruct, screenshot + OCR, Vulkan | Calculator 7 | Native inference runtime crashed; no action | 27.31 |
+
+Local OCR took about 0.47 seconds in a separate extraction check, returning 31
+words including the keypad digits. It also misread a header icon as a digit:
+OCR is helpful evidence, not an infallible control map. Most CPU latency came
+from model prompt evaluation, not OCR. Only three targets in one app were
+scored successfully; these results do not establish drawing, arbitrary-app
+generalization, task completion or safe unattended execution. The 4B CPU model
+also selected 7 correctly with OCR, but took 136.50 seconds versus 66.59 for 2B
+on that target. This single-target comparison does not rank overall model quality.
+
+Live accessibility inspection through the available computer-use tool returned
+no accessibility tree. The label-only check therefore used the explicitly
+**synthetic** committed fixture, not a live app capture. It tests label-to-ID
+selection only; the native input backend still has mock-only coverage.
+
+An isolated, temporary Vulkan server detected the Intel GPU and offloaded the
+language-model layers, but both OCR-assisted requests caused native runtime
+exceptions and HTTP 500 responses. The precise crash cause was not established.
+The 4B GPU run left only about 675 MiB of system RAM free in one observation;
+integrated graphics does not provide a separate large pool of dedicated VRAM.
+GPU acceleration was not enabled globally, and the temporary server was stopped.
+For the current tested setup, use 2B Instruct + `--ocr` on CPU for supervised
+experiments, expecting tens of seconds per proposal. A runtime/driver upgrade
+would need a fresh comparison, not an assumed speed or accuracy improvement.
+
+Evidence files remain local under `artifacts/desktop-probe/`, including
+`calculator-ocr-2b-cpu.json`, `calculator-ocr-2b-cpu-digit5.json`,
+`calculator-ocr-2b-cpu-digit3.json`, `calculator-ocr-4b-cpu.json`, and the failed
+Vulkan probes. The benchmark
+records correctness separately from JSON validity and returns a failure exit
+code for wrong targets or inference errors.
 
 ## Excel, Word and PDF files
 

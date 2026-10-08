@@ -1,0 +1,17 @@
+{
+  "id": "synthetic-uia-contract-v1",
+  "window_id": "fixture-not-a-live-window",
+  "app": "synthetic-control-fixture",
+  "title": "Synthetic accessibility contract fixture - not a live capture",
+  "width": 1000,
+  "height": 600,
+  "elements": [
+    {"id": "c81a024e", "role": "Button", "name": "Ellipse", "bounds": [110, 60, 180, 100]},
+    {"id": "d93706b1", "role": "Button", "name": "Undo", "bounds": [270, 60, 340, 100]},
+    {"id": "f520a86c", "role": "Button", "name": "Rectangle", "bounds": [30, 60, 100, 100]},
+    {"id": "a694d315", "role": "Button", "name": "Export", "bounds": [190, 60, 260, 100]},
+    {"id": "b415e7d2", "role": "Edit", "name": "Document title", "bounds": [30, 120, 340, 160], "editable": true}
+  ],
+  "text": "",
+  "screenshot": null
+}
