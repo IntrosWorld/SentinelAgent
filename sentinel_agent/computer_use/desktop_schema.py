@@ -110,6 +110,7 @@ class DesktopTask(StrictDesktopModel):
     max_steps: int = Field(default=12, ge=1, le=50)
     max_seconds: float = Field(default=180, gt=0, le=900, allow_inf_nan=False)
     max_recoveries: int = Field(default=2, ge=0, le=5)
+    single_step: bool = False
 
     @field_validator("goal", "expect_text")
     @classmethod

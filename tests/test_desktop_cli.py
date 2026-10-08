@@ -70,6 +70,21 @@ async def test_json_denies_input_and_closes_gateway(dependencies, monkeypatch, c
     assert dependencies.closed
 
 
+async def test_single_step_reaches_runner_without_relaxing_json_approval(dependencies, monkeypatch, capsys):
+    class Agent:
+        def __init__(self, planner, session, approve):
+            self.approve = approve
+        async def run(self, task):
+            assert task.single_step is True
+            assert await self.approve(DesktopAction(kind="click", snapshot_id="s", x=1, y=1),
+                                      SimpleNamespace(title="fixture", elements=[])) is False
+            return DesktopResult(status="failed", reason="approval-denied", steps=0)
+    monkeypatch.setattr(cli, "AdaptiveDesktopAgent", Agent)
+    args = cli.build_parser().parse_args(["test goal", "--window-id", "12", "--json", "--single-step"])
+    assert await cli.run(args) == 1
+    assert json.loads(capsys.readouterr().out)["steps"] == 0
+
+
 @pytest.mark.asyncio
 async def test_replay_never_constructs_desktop(dependencies, monkeypatch, tmp_path, capsys):
     path = tmp_path / "snapshot.json"

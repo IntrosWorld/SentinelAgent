@@ -29,6 +29,7 @@ def build_parser():
     parser.add_argument("--ocr", action="store_true", help="Add local Tesseract text locations to vision observations; requires Tesseract on PATH")
     parser.add_argument("--allow-cloud-observations", action="store_true", help="Permit selected-window text AND screenshots to leave this computer; image content is NOT covered by text DLP")
     parser.add_argument("--max-steps", type=int, default=12)
+    parser.add_argument("--single-step", action="store_true", help="Perform at most one approved action, reobserve, then stop for review")
     parser.add_argument("--max-seconds", type=float, default=180)
     parser.add_argument("--json", action="store_true", help="Noninteractive; all desktop input denied")
     parser.add_argument("--snapshot", type=Path, help="Replay a saved DesktopSnapshot JSON; requires --propose-only and never touches apps")
@@ -51,7 +52,7 @@ async def run(args):
         if not args.propose_only and (args.window_id is None or args.window_id <= 0):
             raise ValueError("Choose an exact window ID")
         task = DesktopTask(goal=args.task, expect_text=args.expect_text,
-                           max_steps=args.max_steps, max_seconds=args.max_seconds)
+                           max_steps=args.max_steps, max_seconds=args.max_seconds, single_step=args.single_step)
         profile = ModelRegistry(get_settings().models_file).get(args.model_profile)
         planner = DesktopPlanner(profile, allow_cloud_observations=args.allow_cloud_observations,
                                  vision=not args.no_vision, ocr=args.ocr)

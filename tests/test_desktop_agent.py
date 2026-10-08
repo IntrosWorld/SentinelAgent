@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 import sentinel_agent.computer_use.desktop_agent as agent_module
-from sentinel_agent.computer_use.desktop_agent import AdaptiveDesktopAgent, desktop_goal_matches
+from sentinel_agent.computer_use.desktop_agent import AdaptiveDesktopAgent, desktop_goal_matches, desktop_action_effect
 from sentinel_agent.computer_use.desktop_schema import (
     DesktopAction, DesktopElement, DesktopFailure, DesktopSnapshot, DesktopTask,
     StaleDesktopObservation, validate_desktop_action,
@@ -311,6 +311,7 @@ async def test_uncertain_dispatch_is_terminal_not_retried():
     assert result.reason == "desktop-error"
     assert len(session.act_calls) == len(planner.calls) == 1
     assert result.steps == 0
+    assert {"kind": "action_outcome", "action": "click", "status": "uncertain"} in result.trace
     assert session.closed == 1
 
 
@@ -421,3 +422,109 @@ async def test_start_and_cleanup_errors_are_sanitized_and_cleanup_is_attempted()
     assert {"kind": "cleanup", "reason": "close-error"} in result.trace
     assert "Private" not in result.model_dump_json()
     assert session.closed == 1
+
+
+def test_effect_ignores_regenerated_ids_and_element_order():
+    after = snapshot("new")
+    after = after.model_copy(update={"elements": list(reversed(after.elements))})
+    effect = desktop_action_effect(snapshot(), after)
+    assert effect == {"status": "unchanged", "content_changed": False,
+                      "controls_changed": False, "geometry_changed": False, "image_changed": None}
+
+
+@pytest.mark.parametrize("field,value", [("text", "Changed"), ("screenshot", "new-image"), ("width", 700)])
+def test_effect_reports_changes_without_claiming_success(field, value):
+    before = snapshot(screenshot="old-image")
+    effect = desktop_action_effect(before, before.model_copy(update={field: value}))
+    assert effect["status"] == "changed"
+    assert "success" not in effect and "completed" not in effect
+    if isinstance(value, str):
+        assert value not in repr(effect)
+
+
+def test_effect_without_observable_evidence_is_unknown():
+    assert desktop_action_effect(snapshot(elements=[]), snapshot("s2", elements=[]))["status"] == "unknown"
+    assert desktop_action_effect(snapshot(elements=[], screenshot="a"), snapshot(elements=[]))["image_changed"] is None
+
+
+@pytest.mark.parametrize("kind,fields", [
+    ("click", {"x": 10, "y": 10}), ("scroll", {"x": 10, "y": 10, "direction": "down"}),
+    ("press_key", {"key": "ENTER"}),
+])
+async def test_repeated_identical_unchanged_input_stops_before_second_dispatch(kind, fields):
+    session = FakeSession([snapshot(), snapshot("s2")])
+    planner = FakePlanner([action(kind, **fields), action(kind, "s2", **fields)])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task())
+    assert (result.status, result.reason, result.steps) == ("needs_review", "repeated-unchanged-action", 1)
+    assert len(session.dispatched) == 1
+    assert len([e for e in result.trace if e["kind"] == "approval"]) == 1
+    assert any(e["kind"] == "action_feedback" and e["status"] == "unchanged" for e in result.trace)
+    assert any(e["kind"] == "action_feedback" for e in planner.calls[1][2])
+
+
+async def test_repeated_typing_detected_across_regenerated_control_ids_without_logging_text():
+    session = FakeSession([snapshot(), snapshot("s2")])
+    planner = FakePlanner([action("type", element_id="s1-edit", text="private-value"),
+                           action("type", "s2", element_id="s2-edit", text="private-value")])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task())
+    assert result.reason == "repeated-unchanged-action"
+    assert "private-value" not in result.model_dump_json()
+
+
+async def test_changed_screen_allows_same_coordinates_with_new_approval():
+    session = FakeSession([snapshot(screenshot="a"), snapshot("s2", screenshot="b"),
+                           snapshot("s3", text="Result ready", screenshot="c")])
+    planner = FakePlanner([action("click", x=10, y=10), action("click", "s2", x=10, y=10)])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task())
+    assert result.status == "completed" and result.steps == 2
+    assert len([e for e in result.trace if e["kind"] == "action_feedback"]) == 2
+
+
+async def test_visual_change_does_not_certify_completion():
+    session = FakeSession([snapshot(screenshot="a"), snapshot("s2", screenshot="b")])
+    planner = FakePlanner([action("click", x=10, y=10), action("finish", "s2")])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task(expect_text=None))
+    assert (result.status, result.reason) == ("needs_review", "visual-verification-required")
+    assert any(e["kind"] == "action_feedback" and e["image_changed"] for e in result.trace)
+
+
+async def test_different_action_after_unchanged_observation_is_allowed():
+    session = FakeSession([snapshot(), snapshot("s2"), snapshot("s3", text="Result ready")])
+    planner = FakePlanner([action("click", x=10, y=10), action("click", "s2", x=20, y=20)])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task())
+    assert result.status == "completed" and result.steps == 2
+
+
+async def test_timeout_during_dispatch_is_uncertain_and_never_retried():
+    class SlowDispatch(FakeSession):
+        async def act(self, chosen):
+            self.act_calls.append(chosen)
+            await asyncio.Event().wait()
+    session = SlowDispatch()
+    planner = FakePlanner([action("click", x=10, y=10)])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task(max_seconds=0.03))
+    assert result.reason == "time-limit" and len(session.act_calls) == 1
+    assert {"kind": "action_outcome", "action": "click", "status": "uncertain"} in result.trace
+
+
+async def test_stale_before_dispatch_is_not_logged_as_uncertain_input():
+    session = FakeSession(errors=[StaleDesktopObservation("no input")])
+    result = await AdaptiveDesktopAgent(FakePlanner(), session).run(task(max_recoveries=0))
+    assert result.reason == "stale-limit"
+    assert not any(e["kind"] == "action_outcome" for e in result.trace)
+
+
+async def test_single_step_reobserves_then_stops_without_second_model_request():
+    session = FakeSession([snapshot(), snapshot("s2")])
+    planner = FakePlanner([action("click", x=10, y=10)])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task(single_step=True))
+    assert (result.status, result.reason, result.steps) == ("needs_review", "single-step-complete", 1)
+    assert session.observations == 2 and len(planner.calls) == 1
+    assert any(e["kind"] == "action_feedback" for e in result.trace)
+
+
+async def test_single_step_can_still_verify_independent_goal():
+    session = FakeSession([snapshot(), snapshot("s2", text="Result ready")])
+    planner = FakePlanner([action("click", x=10, y=10)])
+    result = await AdaptiveDesktopAgent(planner, session, approve_all).run(task(single_step=True))
+    assert result.status == "completed" and result.steps == 1

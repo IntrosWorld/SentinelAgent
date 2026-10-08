@@ -172,6 +172,45 @@ invalidate strict screenshot checks. Native UIA calls keep COM thread affinity
 but a hung third-party UIA provider cannot currently be preempted by asyncio's
 deadline. Generalization across **every** application is not claimed.
 
+### Action feedback and non-text icons
+
+Use `--single-step` to propose one input, ask for approval, execute it, capture
+the result and stop for review instead of requesting another model action:
+
+```powershell
+sentinel-agent desktop --list-windows
+# Replace 123456 with the selected harmless window's ID.
+sentinel-agent models add local-vision-4b --provider ollama --model qwen3-vl:4b-instruct --base-url http://127.0.0.1:11434 --vision --timeout 240
+sentinel-agent desktop "Click the square root button" --window-id 123456 --model-profile local-vision-4b --ocr --single-step --max-seconds 300
+```
+
+Inspect the proposed target before approving it; small-model icon recognition
+is not reliable. A single-step run normally returns `needs_review` with a nonzero
+exit status, not a false task-success claim. `--json` still denies live inputs.
+
+The desktop loop records `action_feedback` after dispatch and re-observation:
+whether document text, accessible controls, window dimensions or screenshot
+bytes changed. It ignores regenerated observation/control IDs. Missing image
+evidence is marked unknown, not unchanged. This feedback is available to the
+next planning step, but a change does **not** mean the requested task succeeded.
+An identical consecutive click, key, scroll, drag or text-entry proposal on an
+observably unchanged interface stops with `needs_review: repeated-unchanged-action`
+before dispatching it again. Every permitted input still requires approval.
+Animations and cursor changes can defeat this conservative no-op check; it is
+not a semantic verifier or a general undo mechanism. Delayed effects can also
+require operator review instead of another click.
+Failures/timeouts during dispatch are explicitly logged as an uncertain action
+outcome and never automatically retried; a stale-before-input rejection is
+distinguished from a potentially executed input.
+
+OCR is optional supplementary text evidence. The vision model still sees the
+whole screenshot, including unlabeled shapes, mathematical symbols and icons.
+Accessibility can expose a semantic name even when a button has no visible text.
+However, neither access to pixels nor OCR guarantees that this small model can
+identify an unfamiliar icon. There are no hardcoded square-root coordinates or
+Calculator workflows in the production planner. Unknown/incorrect targets must
+not be accepted just because the model produced valid JSON.
+
 Tests and read-only model probes:
 
 ```powershell
@@ -303,6 +342,38 @@ Evidence files remain local under `artifacts/desktop-probe/`, including
 Vulkan probes. The benchmark
 records correctness separately from JSON validity and returns a failure exit
 code for wrong targets or inference errors.
+
+### Symbol and supervised action follow-up (9 October 2026)
+
+Full regression after the action-loop changes: **679 passed, 2 skipped in
+44.93 seconds**. Tests cover single-step re-observation, approval preservation,
+unchanged-action stopping, private-value-free feedback, uncertain dispatch and
+the distinction between visual changes and verified completion.
+
+Square root was tested on a new real Calculator screenshot showing 9, with no
+accessibility tree available. Expected target bounds were evaluator-only.
+
+| Local model input | Proposed point | Target correct? | Seconds |
+| --- | --- | --- | --- |
+| 2B Instruct, screenshot + OCR | (194, 390), digit 6 | No; not executed | 65.60 |
+| 2B Instruct, screenshot only | (207, 200), memory row | No; not executed | 12.83 |
+| 4B Instruct, screenshot + OCR | (195, 282), square root | Yes | 158.19 |
+
+After the 4B proposal, the assistant inspected a fresh live screenshot, checked
+the point and executed one click through the computer-use tool (`@oai/sky`).
+The next screenshot visibly showed **3** and the expression **square root of 9**.
+Setting up the input 9 was an assistant-selected click, not a local-model action.
+This is a **supervised local-model targeting + live desktop-tool action** result,
+not an autonomous run of Sentinel's native Python executor. That backend still
+has mock-only coverage; the computer-use skill governed the actual Windows input.
+Visual review, not the project's automated verifier, confirmed the result.
+
+One successful symbol does not establish general icon understanding. The 4B
+result supports trying it on difficult targets, with much higher CPU latency;
+the cheaper 2B model failed this particular symbol both with and without OCR.
+No app-specific coordinates, recipes, icon labels or corrected model answers
+were added to production code. Screenshots and `sqrt-action-evidence.json` remain
+local in ignored `artifacts/desktop-probe/`; all three model probes are retained.
 
 ## Excel, Word and PDF files
 
