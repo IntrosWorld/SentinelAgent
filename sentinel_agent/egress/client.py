@@ -37,7 +37,7 @@ current_gateway: ContextVar = ContextVar("sentinel_egress", default=None)
 
 
 class EgressGateway:
-    def __init__(self, run_id=None, *, enabled=None, policy=None, audit_root=None, port=None, scanner=None):
+    def __init__(self, run_id=None, *, enabled=None, policy=None, audit_root=None, port=None, scanner=None, proxy_limits=None):
         settings = get_settings()
         config = EgressConfig.from_profiles(ModelRegistry(settings.models_file).list(),
                                            approved_sites=tuple(settings.egress_approved_sites))
@@ -53,6 +53,7 @@ class EgressGateway:
         self.thread = None
         self.events = []
         self.browser = None
+        self.proxy_limits = proxy_limits
 
     def start(self):
         if self.loop is not None:
@@ -63,7 +64,7 @@ class EgressGateway:
 
         async def initialize():
             if self.enabled:
-                self.proxy = await EgressProxy(self.policy, self.audit, port=self.port).start()
+                self.proxy = await EgressProxy(self.policy, self.audit, port=self.port, limits=self.proxy_limits).start()
 
         try:
             self.call(initialize())

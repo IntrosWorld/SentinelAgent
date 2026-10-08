@@ -349,6 +349,9 @@ def build_models_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     with suppress(KeyboardInterrupt):
+        if len(sys.argv) > 1 and sys.argv[1] == "browse":
+            from sentinel_agent.computer_use.cli import build_parser as browser_parser, run as browse
+            raise SystemExit(asyncio.run(browse(browser_parser().parse_args(sys.argv[2:]))))
         if len(sys.argv) > 1 and sys.argv[1] == "egress":
             parser = argparse.ArgumentParser(prog="sentinel-agent egress")
             parser.add_argument("command", choices=["status", "report", "verify"])
