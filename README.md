@@ -75,6 +75,129 @@ The live agent can inspect accessible controls, focus a uniquely identified wind
 
 For Notepad tasks, SentinelAgent creates and opens a uniquely named scratch file under `artifacts/`. It will not type into an existing document. The scratch filename is carried as a mandatory window-title hint for every subsequent action.
 
+## Experimental general desktop agent (`agentic-computer`)
+
+This branch adds a shared **observe -> propose one action -> approve -> act ->
+observe again** loop for an operator-selected Windows window. It does not have
+Paint/Calculator/Notepad task scripts or fixed button coordinates. The model
+sees current accessibility labels, roles, bounds and content; a vision-capable
+model also receives a screenshot of that window. It can propose click,
+double-click, hover, drag, literal text entry, allowlisted keys, scroll and wait.
+Targets are current observed IDs or screenshot-relative pixels, not generated
+shell commands or Python code.
+
+Install the Windows dependencies, open a harmless scratch app, and select its
+window explicitly:
+
+```powershell
+python -m pip install -e ".[desktop,dev]"
+sentinel-agent desktop --list-windows
+sentinel-agent desktop "Calculate 7 plus 5" --window-id 123456
+```
+
+Replace `123456` with the actual returned ID. The initial prototype binds to
+**one existing window**; it does not autonomously launch or switch arbitrary
+apps. Use the existing allowlisted `open_app` workflow or open an app yourself.
+Restore maximized windows if their invisible borders extend outside the screen.
+Keep the selected window visible and avoid moving the mouse during a drag.
+Every input requires terminal approval. Approval explicitly returns focus to
+the bound window, then its identity and observation are checked again. Ctrl+C
+stops the runner; noninteractive `--json` mode denies all input.
+
+Model configuration remains provider-independent. New default installations
+include `local-vision` (`qwen3-vl:2b-instruct` through local Ollama); the existing active
+text model is unchanged. If you already have a saved registry, add a profile:
+
+```powershell
+sentinel-agent models add local-vision --provider ollama --model qwen3-vl:2b-instruct --base-url http://127.0.0.1:11434 --vision
+sentinel-agent desktop "Select the rectangle tool without drawing" --window-id 123456 --model-profile local-vision
+sentinel-agent desktop "Enter hello into the document" --window-id 123456 --model-profile local-ollama --no-vision --expect-text "hello"
+```
+
+`--vision` declares a model capability, not a performance guarantee. The model
+must actually be installed and accept images. Ollama, OpenAI-compatible,
+Anthropic and Gemini image payloads are supported. Only loopback model endpoints
+are allowed by default. Remote/LAN observations require explicit
+`--allow-cloud-observations`; remote transport must use HTTPS. That opt-in
+permits sending the selected window's **text and pixels**. Existing text DLP
+does **not** inspect secrets inside images. Screenshots are not saved by the
+normal runner, and model/desktop errors do not echo pixel payloads. The egress
+gateway governs Sentinel's model requests, not all network traffic of native
+applications.
+
+The executor checks process identity, current controls, bounds, focus, DPI,
+occlusion and screenshot freshness. Known credential/security/terminal scopes
+are refused, and text input requires a non-password editable control. These
+guards are defense-in-depth, not an OS sandbox or a guarantee that unknown
+custom interfaces contain no sensitive data. Use disposable documents and
+supervise the prototype.
+
+`--expect-text` checks Document/Edit content, not static text/button labels or the model's
+claim. It is a narrow operator-supplied condition, not proof of every part of a
+complex task. Visual-only goals return `needs_review` when the model finishes;
+they are not falsely reported as verified. Calculator displays exposed only as
+static text also require review. Native top-level tooltips/popups are not yet
+merged into observations and may stop the run; hover is an input primitive,
+not a guarantee of tooltip understanding. Blinking cursors/animations can
+invalidate strict screenshot checks. Native UIA calls keep COM thread affinity
+but a hung third-party UIA provider cannot currently be preempted by asyncio's
+deadline. Generalization across **every** application is not claimed.
+
+Tests and read-only model probes:
+
+```powershell
+python -m pytest tests/test_desktop_agent.py tests/test_desktop_planner.py tests/test_desktop_windows.py tests/test_desktop_cli.py -q
+sentinel-agent desktop "Click the digit 7" --snapshot artifacts/desktop-probe/calculator-zero.json --propose-only --json
+python -m benchmark.desktop_probe artifacts/desktop-probe/calculator-zero.json "Click the digit 7 button." --model qwen3-vl:2b-instruct
+```
+
+Snapshots are local, user-supplied `DesktopSnapshot` JSON fixtures. `--snapshot`
+requires `--propose-only` and never constructs a desktop executor. The probe
+records model, snapshot hash, elapsed time and the proposed action separately
+from execution evidence. Never equate a valid proposal with a completed UI task.
+Wire formats follow [Ollama vision](https://docs.ollama.com/capabilities/vision)
+and [structured output](https://docs.ollama.com/capabilities/structured-outputs)
+documentation.
+
+### Desktop test results (9 October 2026)
+
+Full automated regression: **453 passed, 2 skipped in 75.48 seconds**.
+The skips are existing opt-in integration tests; no live model accuracy claim
+is implied by the unit-test count.
+
+The local vision experiment did **not** establish reliable autonomous control.
+Real screenshots were captured through the computer-use tool; model requests
+used this project's planner and egress gateway. The native Python input backend
+has **mock-only** coverage (45 tests), not a completed live end-to-end run.
+Calculator and the existing Paint drawing were not edited by model actions.
+
+| Check | Observed result |
+| --- | --- |
+| Initial 2B Paint screenshot probe, 1536 x 864 | Timed out at 180 seconds |
+| Initial 2B Calculator screenshot probe, 322 x 534 | Timed out at 120 seconds |
+| Compact prompt with old permissive grammar | Invalid action, 41.50 seconds |
+| Compact prompt with exact-field grammar, 2B Instruct | Valid click proposal in 2.33 seconds on a warm cached run, but **wrong target** |
+| Same final grammar, installed 4B model | No valid action within the 250-token output budget; 88.52 seconds |
+
+For the 2B result, the requested Calculator `7` button occupied approximately
+x=4..80, y=320..370 in the 322 x 534 capture. The model proposed (174,324),
+outside that button. That proposal was **not executed**. Valid JSON and
+in-window coordinates do not establish that a target is semantically correct.
+The 2.33-second warm result is not a cold-start latency guarantee. The first
+2B result was improved by removing duplicate schema text and requiring exact
+action fields during decoding, but this did not fix visual grounding accuracy.
+
+The installed 4B tag advertises thinking support; it was tested with
+`think=false`, but did not yield a valid final action within this bounded run.
+An Instruct profile is the lightweight default for further experiments, not a
+claim that 2B vision is sufficient. Larger/GUI-specialized models and richer
+accessibility targeting still need comparative testing. No models were
+downloaded and no cloud screenshot requests were made.
+
+Local evidence is under `artifacts/desktop-probe/` (ignored by Git), including
+`calculator-strict-2b.json`, `calculator-strict-4b.json`, snapshots and earlier
+failed probes. Do not publish screenshot fixtures without reviewing them.
+
 ## Excel, Word and PDF files
 
 SentinelAgent can create styled `.xlsx`, `.docx` and `.pdf` files inside `artifacts/`. Edits require approval and create a timestamped copy under `artifacts/backups/` before changing the original.

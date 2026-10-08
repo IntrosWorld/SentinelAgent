@@ -269,10 +269,11 @@ async def async_main(args: argparse.Namespace) -> int:
 
 def show_models(registry: ModelRegistry) -> None:
     configuration = registry.load()
-    print("ACTIVE  NAME              PROVIDER              MODEL")
+    print("ACTIVE  NAME              PROVIDER              MODEL (CAPABILITIES)")
     for profile in configuration.profiles:
         active = "*" if configuration.active == profile.name else ""
-        print(f"{active:6}  {profile.name:16}  {profile.provider:20}  {profile.model}")
+        capability = "vision" if profile.vision else "text"
+        print(f"{active:6}  {profile.name:16}  {profile.provider:20}  {profile.model} ({capability})")
 
 
 async def manage_models(args: argparse.Namespace) -> int:
@@ -296,6 +297,7 @@ async def manage_models(args: argparse.Namespace) -> int:
             base_url=args.base_url,
             api_key_env=args.api_key_env,
             timeout=args.timeout,
+            vision=getattr(args, "vision", False),
         )
         registry.add(profile)
         print(f"Saved model profile: {profile.name}. No secret value was stored.")
@@ -342,6 +344,7 @@ def build_models_parser() -> argparse.ArgumentParser:
     add.add_argument("--base-url", required=True)
     add.add_argument("--api-key-env", help="Environment variable containing the API key; never the key itself")
     add.add_argument("--timeout", type=float, default=120.0)
+    add.add_argument("--vision", action="store_true", help="Declare that this model accepts images (desktop mode checks this capability)")
     test = subparsers.add_parser("test", help="Check profile configuration and connectivity")
     test.add_argument("name", nargs="?")
     return parser
@@ -349,6 +352,9 @@ def build_models_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     with suppress(KeyboardInterrupt):
+        if len(sys.argv) > 1 and sys.argv[1] == "desktop":
+            from sentinel_agent.computer_use.desktop_cli import build_parser as desktop_parser, run as desktop_run
+            raise SystemExit(asyncio.run(desktop_run(desktop_parser().parse_args(sys.argv[2:]))))
         if len(sys.argv) > 1 and sys.argv[1] == "browse":
             from sentinel_agent.computer_use.cli import build_parser as browser_parser, run as browse
             raise SystemExit(asyncio.run(browse(browser_parser().parse_args(sys.argv[2:]))))

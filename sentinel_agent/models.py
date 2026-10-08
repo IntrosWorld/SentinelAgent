@@ -18,6 +18,7 @@ class ModelProfile(BaseModel):
     base_url: str
     api_key_env: str | None = None
     timeout: float = Field(default=120.0, gt=0)
+    vision: bool = False
 
     @property
     def api_key(self) -> str | None:
@@ -41,6 +42,14 @@ DEFAULT_PROFILES = [
         provider="openai_compatible",
         model="local-model",
         base_url="http://127.0.0.1:1234/v1",
+    ),
+    ModelProfile(
+        name="local-vision",
+        provider="ollama",
+        model="qwen3-vl:2b-instruct",
+        base_url="http://127.0.0.1:11434",
+        timeout=120.0,
+        vision=True,
     ),
     ModelProfile(
         name="openai",
