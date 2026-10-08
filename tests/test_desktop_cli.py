@@ -5,6 +5,7 @@ import pytest
 
 from sentinel_agent.computer_use import desktop_cli as cli
 from sentinel_agent.computer_use.desktop_schema import DesktopAction, DesktopResult
+from sentinel_agent.models import ModelProfile
 
 
 class FakeGateway:
@@ -27,8 +28,9 @@ class FakeGateway:
 def dependencies(monkeypatch):
     gateway = FakeGateway()
     monkeypatch.setattr(cli, "EgressGateway", lambda **kwargs: gateway)
-    monkeypatch.setattr(cli, "ModelRegistry", lambda _: SimpleNamespace(get=lambda name: SimpleNamespace(timeout=120)))
-    monkeypatch.setattr(cli, "DesktopPlanner", lambda *args, **kwargs: object())
+    profile = ModelProfile(name="test", provider="ollama", model="local", base_url="http://127.0.0.1:11434", vision=True)
+    monkeypatch.setattr(cli, "ModelRegistry", lambda _: SimpleNamespace(get=lambda name: profile))
+    monkeypatch.setattr(cli, "DesktopPlanner", lambda *args, **kwargs: SimpleNamespace(base_url=profile.base_url))
     monkeypatch.setattr(cli, "WindowsDesktopSession", lambda *args, **kwargs: object())
     return gateway
 
@@ -74,6 +76,7 @@ async def test_replay_never_constructs_desktop(dependencies, monkeypatch, tmp_pa
     path.write_text(json.dumps({"id": "s", "window_id": "12", "app": "demo", "title": "demo",
                                "width": 100, "height": 80, "elements": []}), encoding="utf-8")
     class Planner:
+        base_url = "http://127.0.0.1:11434"
         async def next_action(self, *args):
             return DesktopAction(kind="click", snapshot_id="s", x=20, y=30)
     monkeypatch.setattr(cli, "DesktopPlanner", lambda *args, **kwargs: Planner())
@@ -111,3 +114,61 @@ async def test_approved_input_reacquires_only_bound_window(dependencies, monkeyp
     monkeypatch.setattr(cli, "AdaptiveDesktopAgent", Agent)
     assert await cli.run(cli.build_parser().parse_args(["test goal", "--window-id", "12"])) == 1
     assert "needs_review" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_ocr_flag_reaches_planner_in_replay(dependencies, monkeypatch, tmp_path):
+    path = tmp_path / "frame.json"
+    path.write_text(json.dumps({"id": "s", "window_id": "1", "app": "fixture", "title": "fixture",
+                               "width": 100, "height": 80}), encoding="utf-8")
+    class Planner:
+        base_url = "http://127.0.0.1:11434"
+        async def next_action(self, *args):
+            return DesktopAction(kind="click", snapshot_id="s", x=20, y=30)
+    def build(*args, **kwargs):
+        assert kwargs["ocr"] is True
+        assert kwargs["vision"] is True
+        return Planner()
+    monkeypatch.setattr(cli, "DesktopPlanner", build)
+    args = cli.build_parser().parse_args(["Click test", "--snapshot", str(path), "--propose-only", "--ocr"])
+    assert await cli.run(args) == 0
+
+
+@pytest.mark.asyncio
+async def test_model_cli_saves_explicit_coordinate_mode(tmp_path, monkeypatch):
+    from sentinel_agent import cli as main_cli
+    from sentinel_agent.models import ModelRegistry
+    registry_path = tmp_path / "models.json"
+    monkeypatch.setattr(main_cli, "get_settings", lambda: SimpleNamespace(models_file=str(registry_path)))
+    args = main_cli.build_models_parser().parse_args([
+        "add", "local-alias", "--provider", "ollama", "--model", "my-vision-model",
+        "--base-url", "http://127.0.0.1:11434", "--vision", "--desktop-coordinates", "normalized_1000",
+    ])
+    assert await main_cli.manage_models(args) == 0
+    saved = ModelRegistry(registry_path).get("local-alias")
+    assert saved.desktop_coordinates == "normalized_1000"
+    assert saved.vision is True
+    assert ModelRegistry(registry_path).get().name == "local-ollama"
+
+
+@pytest.mark.asyncio
+async def test_selected_localhost_profile_uses_canonical_exact_policy(dependencies, monkeypatch, tmp_path):
+    received = {}
+    profile = ModelProfile(name="test", provider="ollama", model="local", base_url="http://localhost:11435", vision=True)
+    monkeypatch.setattr(cli, "ModelRegistry", lambda _: SimpleNamespace(get=lambda name: profile))
+    def gateway(**kwargs):
+        received.update(kwargs)
+        return dependencies
+    monkeypatch.setattr(cli, "EgressGateway", gateway)
+    class Planner:
+        base_url = "http://127.0.0.1:11435"
+        async def next_action(self, *args):
+            return DesktopAction(kind="wait", snapshot_id="s")
+    monkeypatch.setattr(cli, "DesktopPlanner", lambda *args, **kwargs: Planner())
+    path = tmp_path / "frame.json"
+    path.write_text(json.dumps({"id": "s", "window_id": "1", "app": "fixture", "title": "fixture",
+                               "width": 100, "height": 80}), encoding="utf-8")
+    args = cli.build_parser().parse_args(["Inspect test", "--snapshot", str(path), "--propose-only"])
+    assert await cli.run(args) == 0
+    assert (await received["policy"].evaluate_url("http://127.0.0.1:11435/api/chat")).allowed
+    assert not (await received["policy"].evaluate_url("http://127.0.0.1:11434/api/chat")).allowed

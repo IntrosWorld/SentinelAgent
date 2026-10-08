@@ -12,6 +12,8 @@ from sentinel_agent.computer_use.desktop_schema import DesktopSnapshot, DesktopT
 from sentinel_agent.computer_use.desktop_windows import WindowsDesktopSession
 from sentinel_agent.config import get_settings
 from sentinel_agent.egress.client import EgressGateway
+from sentinel_agent.egress.config import EgressConfig
+from sentinel_agent.egress.policy import DestinationPolicy
 from sentinel_agent.egress.proxy import ProxyLimits
 from sentinel_agent.models import ModelRegistry
 
@@ -21,9 +23,10 @@ def build_parser():
     parser.add_argument("task", nargs="?", help="Goal for the selected window")
     parser.add_argument("--list-windows", action="store_true", help="List windows; does not launch or close applications")
     parser.add_argument("--window-id", type=int, help="Exact ID from --list-windows; open the app yourself first")
-    parser.add_argument("--expect-text", help="Independent completion condition in document/display text; otherwise finish needs human review")
+    parser.add_argument("--expect-text", help="Independent completion condition in Document/Edit content; otherwise finish needs human review")
     parser.add_argument("--model-profile", default="local-vision")
     parser.add_argument("--no-vision", action="store_true", help="Send accessibility text only; use a text-capable profile")
+    parser.add_argument("--ocr", action="store_true", help="Add local Tesseract text locations to vision observations; requires Tesseract on PATH")
     parser.add_argument("--allow-cloud-observations", action="store_true", help="Permit selected-window text AND screenshots to leave this computer; image content is NOT covered by text DLP")
     parser.add_argument("--max-steps", type=int, default=12)
     parser.add_argument("--max-seconds", type=float, default=180)
@@ -51,9 +54,11 @@ async def run(args):
                            max_steps=args.max_steps, max_seconds=args.max_seconds)
         profile = ModelRegistry(get_settings().models_file).get(args.model_profile)
         planner = DesktopPlanner(profile, allow_cloud_observations=args.allow_cloud_observations,
-                                 vision=not args.no_vision)
+                                 vision=not args.no_vision, ocr=args.ocr)
         # Cannot disable egress policy in this experimental mode.
-        gateway = EgressGateway(enabled=True, proxy_limits=ProxyLimits(
+        canonical_profile = profile.model_copy(update={"base_url": planner.base_url})
+        model_policy = DestinationPolicy(EgressConfig.from_profiles([canonical_profile], approved_sites=()))
+        gateway = EgressGateway(enabled=True, policy=model_policy, proxy_limits=ProxyLimits(
             idle_timeout=max(30, min(profile.timeout, task.max_seconds)),
         )).start()
         with gateway.activate():

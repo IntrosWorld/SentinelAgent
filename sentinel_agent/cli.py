@@ -298,6 +298,7 @@ async def manage_models(args: argparse.Namespace) -> int:
             api_key_env=args.api_key_env,
             timeout=args.timeout,
             vision=getattr(args, "vision", False),
+            desktop_coordinates=getattr(args, "desktop_coordinates", "auto"),
         )
         registry.add(profile)
         print(f"Saved model profile: {profile.name}. No secret value was stored.")
@@ -345,6 +346,8 @@ def build_models_parser() -> argparse.ArgumentParser:
     add.add_argument("--api-key-env", help="Environment variable containing the API key; never the key itself")
     add.add_argument("--timeout", type=float, default=120.0)
     add.add_argument("--vision", action="store_true", help="Declare that this model accepts images (desktop mode checks this capability)")
+    add.add_argument("--desktop-coordinates", choices=["auto", "pixels", "normalized_1000"], default="auto",
+                     help="Desktop model output coordinates; auto recognizes Qwen3-VL, otherwise pixels")
     test = subparsers.add_parser("test", help="Check profile configuration and connectivity")
     test.add_argument("name", nargs="?")
     return parser

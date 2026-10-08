@@ -19,6 +19,29 @@ def test_registry_switches_profiles_without_storing_secrets(tmp_path, monkeypatc
     assert "do-not-write-this" not in saved
 
 
+@pytest.mark.parametrize("mode", ["auto", "pixels", "normalized_1000"])
+def test_registry_preserves_explicit_desktop_coordinate_mode(tmp_path, mode):
+    registry = ModelRegistry(tmp_path / "models.json")
+    registry.add(ModelProfile(name="vision-test", provider="ollama", model="test-model",
+                              base_url="http://127.0.0.1:11434", vision=True, desktop_coordinates=mode))
+    loaded = registry.get("vision-test")
+    assert loaded.desktop_coordinates == mode
+    assert registry.get().name == "local-ollama"
+
+
+def test_legacy_profiles_load_without_desktop_coordinate_metadata():
+    legacy = ModelProfile.model_validate({"name": "legacy", "provider": "ollama", "model": "model",
+                                         "base_url": "http://127.0.0.1:11434"})
+    assert legacy.desktop_coordinates == "auto"
+
+
+@pytest.mark.parametrize("mode", ["normalized", "normalized_1", 1000, None, True])
+def test_invalid_desktop_coordinate_modes_are_rejected(mode):
+    with pytest.raises(ValueError):
+        ModelProfile(name="invalid", provider="ollama", model="model", base_url="http://127.0.0.1:11434",
+                     desktop_coordinates=mode)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("provider", "response_body"), [
     ("openai_compatible", {"choices": [{"message": {"content": '{"goal":"demo","actions":[]}'}}]}),

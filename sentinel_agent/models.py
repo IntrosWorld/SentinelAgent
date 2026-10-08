@@ -19,6 +19,7 @@ class ModelProfile(BaseModel):
     api_key_env: str | None = None
     timeout: float = Field(default=120.0, gt=0)
     vision: bool = False
+    desktop_coordinates: Literal["auto", "pixels", "normalized_1000"] = "auto"
 
     @property
     def api_key(self) -> str | None:
