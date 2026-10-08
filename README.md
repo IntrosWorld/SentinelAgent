@@ -119,6 +119,136 @@ python -m sentinel_agent.benchmark --model
 - FastAPI dashboard showing the complete execution trace
 - Terminal-first interactive interface with approval prompts and verified traces
 
+## Experimental adaptive browser — `adaptive-browser` branch
+
+This opt-in mode adds a closed feedback loop instead of executing one up-front
+plan. It is a browser-only research prototype, not Codex/Claude feature parity.
+The normal `sentinel-agent` commands remain unchanged.
+
+Each turn captures bounded top-level page text and controls, asks the selected
+model for exactly one action, validates its observation/control IDs, requests
+approval where required, dispatches, and observes again. Supported actions are
+click, fill, scroll, brief wait and finish. A model's `finish` does not establish
+success: the current rendered text must match the user's `--expect-text`, and
+the exact final URL must match `--expect-url` when supplied. Use a specific,
+meaningful marker; this checks the declared predicate, not arbitrary task meaning.
+The visible marker is page-supplied evidence, not a cryptographic proof of an
+external transaction. Input values and hidden DOM text do not satisfy it.
+
+Native Ollama uses a dedicated single-action JSON schema, including the current
+snapshot ID and an enum of current element IDs, through `/api/chat`. It follows
+[Ollama's structured-output interface](https://docs.ollama.com/capabilities/structured-outputs).
+Application-side validation remains mandatory. Other existing profile adapters
+use the one-action prompt and reject multi-action output; those providers have
+not been live-evaluated for this experimental mode. There is no deterministic
+fallback disguising a model failure as success.
+
+| Module under `sentinel_agent/computer_use/` | Responsibility |
+|---|---|
+| `schema.py` | Strict actions, observations, bounded task settings and results |
+| `browser.py` | Private authenticated context, observed DOM handles and guarded dispatch |
+| `planner.py` | Existing model profiles adapted to a single next action, no silent fallback |
+| `agent.py` | Observe/decide/approve/act loop, independent completion checks, bounded recovery |
+| `cli.py` | Opt-in terminal interface, approvals, cloud-data consent and cleanup |
+
+Install the existing browser extra and inspect the new command:
+
+```powershell
+python -m pip install -e ".[browser,dev]"
+sentinel-agent browse --help
+```
+
+Command shape (replace the example URL and expected marker with your own test site):
+
+```powershell
+sentinel-agent browse "Search for hello world" `
+  --url "https://your-test-site.example/search" `
+  --expect-text "Results for hello world" `
+  --model-profile local-ollama --max-steps 10 --max-seconds 360
+```
+
+The destination still needs to pass the existing egress policy; eligible unknown
+public hosts require run-scoped approval. Private-network/IP restrictions cannot
+be overridden by that approval. Arbitrary localhost sites are **not** exempted.
+The automated tests create a precisely scoped loopback exception only for their
+own temporary test server. Choose `--browser edge` to use installed Edge, or
+`--headless` to hide the managed window. This mode always enables egress control.
+
+Clicks and fills require fresh explicit approval, including an escaped target
+label, origin and DLP-processed proposed fill text. `--json` or non-terminal stdin
+declines those approvals; there is no production `--auto-approve` switch. Deadline
+and Ctrl+C cancellation stop pending planning/approval/IO, followed by cleanup.
+The wall-clock deadline includes human approval time. Managed pages close when
+the run ends. Local-only defaults apply to extracted observations: selecting a
+remote model also requires `--allow-cloud-observations`. That flag permits page
+text to be sent through the existing prompt-DLP boundary; it does not guarantee
+complete data sanitization. No screenshots or image uploads are implemented.
+
+Security and reliability boundaries:
+
+- Model actions cannot supply JavaScript, CSS selectors or arbitrary coordinates.
+  Random IDs refer only to captured DOM handles. Old observations, replaced nodes,
+  changed form values, URL changes and DOM mutations invalidate the action.
+- Staleness detected before dispatch permits at most two re-observation/replanning
+  attempts by default. Every replacement action needs approval again. Uncertain
+  failures after dispatch stop the run; consequential actions are not blindly retried.
+- Fixed driver code uses guarded synthetic DOM click/input events. This is not
+  native mouse/keyboard control. Interfaces requiring trusted events, shadow DOM,
+  iframes, file uploads/downloads, multi-tab workflows or visual grounding are not
+  supported. Dynamic pages that keep mutating can exhaust the stale-state budget.
+- Password, file, recognized credential/payment fields and associated forms are
+  excluded. Ordinary hidden CSRF/locale fields remain unexposed without disabling
+  otherwise usable forms. Non-web links/form actions are excluded. Field-name
+  heuristics are not a complete classifier; arbitrary site scripts are not an OS
+  sandbox and can behave differently from their labels. Use isolated test sites.
+- Observations are capped at 12,000 text characters and 60 controls; large pages
+  may omit relevant content. The local Ollama prompt further limits this to 3,000
+  text characters and 20 controls to fit its context budget. Page text is treated as untrusted data in
+  the planner prompt. That instruction is not proof of prompt-injection immunity;
+  deterministic action constraints and approvals remain necessary.
+- Trace output stores action kinds, opaque IDs, counts and outcomes, not raw page
+  contents or typed values. The usual egress audit remains separate. Adaptive runs
+  extend proxy idle timeout to the model profile's response timeout, bounded by
+  the task budget with a 30-second floor, so CPU inference can return its first byte.
+  Other gateway defaults and the overall task deadline remain in effect.
+
+Reproduce the offline control tests and optional installed-model check:
+
+```powershell
+python -m pytest tests/test_computer_agent.py tests/test_computer_cli.py tests/test_computer_browser.py tests/test_computer_integration.py -q
+# Optional: uses the installed qwen2.5-coder:7b on local Ollama, not a cloud API.
+$env:SENTINEL_LIVE_MODEL_TEST = "1"
+python -m pytest tests/test_computer_integration.py -k local_7b -q
+$env:SENTINEL_LIVE_MODEL_TEST = "0"
+```
+
+The normal integration tests use actual headless Chrome with a deterministic
+test planner and local HTML fixture. They verify the feedback loop and recovery,
+not language-model intelligence. Test-only approvals are scoped to that fixture's
+search controls. Optional Ollama evaluation measures a separate real-model path.
+
+Full regression run on 8 October 2026: `239 passed, 2 skipped in 50.48s`.
+The skips are the opt-in public YouTube test and local-model evaluation; the
+latter was also run separately as described below. No cloud API was used.
+
+Verified on 8 October 2026: the opt-in local `qwen2.5-coder:7b` test completed the
+real Chrome fixture workflow (`1 passed, 2 deselected in 142.86s`). It ran on CPU
+and used an explicit 180-second per-request timeout with a 360-second run budget.
+This is one small workflow, not a general desktop benchmark. Initial attempts
+failed closed: the old 30-second proxy idle timeout cut off inference, and the
+general Plan adapter returned two actions instead of one. The adaptive timeout
+and single-action schema changes address those observed failures. No browser
+actions were executed from a rejected model plan.
+
+For similarly slow CPU inference, configure a separate local profile rather than
+silently changing your existing default:
+
+```powershell
+sentinel-agent models add adaptive-local --provider ollama `
+  --model qwen2.5-coder:7b --base-url http://127.0.0.1:11434 --timeout 180
+# Then use --model-profile adaptive-local --max-seconds 360 with browse.
+```
+
 ## Research roadmap
 
 ### Phase 1 — foundation (weeks 1–4)
