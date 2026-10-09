@@ -63,6 +63,19 @@ async def opened(rig):
     return await rig.session.observe()
 
 
+async def test_controller_window_cannot_approve_itself(rig, monkeypatch):
+    monkeypatch.setenv("SENTINEL_DESKTOP_HOST_PID", "7")
+    with pytest.raises(DesktopFailure, match="own approval window"):
+        await rig.session.start()
+    rig.window.set_focus.assert_not_called()
+
+
+def test_window_picker_excludes_controller(rig, monkeypatch):
+    monkeypatch.setenv("SENTINEL_DESKTOP_HOST_PID", "7")
+    monkeypatch.setattr(WindowsDesktopSession, "_libraries", lambda _: rig.dependencies)
+    assert WindowsDesktopSession.list_windows() == []
+
+
 def action(snapshot, kind="click", **fields):
     if not fields and kind in {"click", "double_click", "hover", "type"}:
         fields["element_id"] = snapshot.elements[0].id

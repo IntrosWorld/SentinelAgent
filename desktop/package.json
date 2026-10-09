@@ -1,0 +1,58 @@
+{
+  "name": "sentinel-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first desktop control with reviewed actions",
+  "author": "SentinelAgent",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "start": "npm run build && electron .",
+    "test": "node --test tests/*.test.cjs",
+    "test:ui": "node tests/ui.cjs",
+    "runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime.ps1",
+    "smoke": "npm run build && electron . --smoke-test",
+    "package": "npm run build && electron-builder --win portable --x64",
+    "package:dir": "npm run build && electron-builder --dir --win --x64"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "lucide-react": "1.54.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  },
+  "build": {
+    "appId": "world.intros.sentinel",
+    "productName": "Sentinel Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "runtime/sentinel-runtime",
+        "to": "runtime"
+      }
+    ],
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "Sentinel-Desktop-${version}-Windows.exe"
+    }
+  }
+}

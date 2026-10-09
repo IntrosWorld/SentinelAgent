@@ -7,3 +7,9 @@ __pycache__/
 artifacts/
 node_modules/
 PROJECT_PLAN.md
+desktop/dist/
+desktop/release/
+desktop/runtime/
+desktop/.test-data/
+desktop/test-results/
+build/
