@@ -14,6 +14,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { spawn } = require("node:child_process");
+const { portableDataDirectory, decryptCredentials } = require("./portable.cjs");
 const {
   RuntimeBridge,
   validateCall,
@@ -28,8 +29,18 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 app.setName("Sentinel Desktop");
-if (process.env.SENTINEL_DESKTOP_DATA)
-  app.setPath("userData", path.resolve(process.env.SENTINEL_DESKTOP_DATA));
+const portableData = portableDataDirectory(app.isPackaged);
+if (portableData) {
+  try {
+    fs.mkdirSync(portableData, { recursive: true });
+    fs.accessSync(portableData, fs.constants.W_OK);
+    app.setPath("userData", portableData);
+    app.setPath("sessionData", portableData);
+  } catch {
+    dialog.showErrorBox("Portable folder is not writable", "Move Sentinel Desktop to a writable folder or USB drive. Its SentinelData folder must be writable.");
+    app.exit(1);
+  }
+}
 const smoke = process.argv.includes("--smoke-test");
 if (!app.requestSingleInstanceLock()) app.exit(0);
 let window, bridge, ownedOllama, runtimeReady;
@@ -103,10 +114,11 @@ async function startRuntime() {
   try {
     await current.request("status", {}, 15000);
     if (safeStorage.isEncryptionAvailable()) {
-      for (const [name, encrypted] of Object.entries(readJSON(secretsFile()))) {
-        const key = safeStorage.decryptString(Buffer.from(encrypted, "base64"));
-        await current.request("credentials.set", { name, key });
+      const restored = decryptCredentials(readJSON(secretsFile()), value => safeStorage.decryptString(value));
+      for (const key of restored.keys) {
+        await current.request("credentials.set", key);
       }
+      if (restored.unavailable.length) event({ event: "host_notice", message: "Some saved API keys cannot be decrypted on this Windows account. Re-enter them in Models & setup. Local models remain available." });
     }
   } catch (error) {
     current.close();
