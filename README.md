@@ -2,6 +2,51 @@
 
 An offline-first, safety-aware computer-use agent research MVP. It can use Ollama, OpenAI-compatible servers, OpenAI, Anthropic or Gemini for constrained planning while deterministic code owns policy decisions, execution and postcondition verification.
 
+## Desktop app (Windows preview)
+
+The `desktop-application` branch adds the approved conversation interface using Electron, React and TypeScript, with the existing Python agent in a separate process. This is our chosen architecture, not a claim about the complete proprietary stack of Claude or Codex.
+
+From the repository root, with Node.js 22.12+ (tested with 24) and Python 3.11+:
+
+```powershell
+python -m pip install -e ".[desktop,dev]"
+cd desktop
+npm ci
+npm start
+```
+
+In **Models & setup**, enter an Ollama server URL (normally `http://127.0.0.1:11434`), discover installed models, choose a vision-capable model ID, and save/test the profile. Local OpenAI-compatible servers such as LM Studio use their `/v1` endpoint. Cloud profiles support OpenAI-compatible, Anthropic and Gemini endpoints. Provider selection does not infer a URL or model: fill both explicitly. Anthropic/Gemini testing reports credential configuration only, not verified authentication.
+
+Ollama executable selection is optional: browse to `ollama.exe`, auto-detect it, or paste an absolute path. **Save path** then **Start Ollama** requests confirmation before launching that executable on loopback. An already-running server is not stopped. Models are installed separately through Ollama; the app does not silently download model weights. Tesseract on PATH is optional for OCR.
+
+Select an already-open permitted window, enter an instruction, and start. Single-step is enabled by default. Review each proposed input, then approve once or decline. **Stop task** remains available in the top bar, including while viewing setup. It requests cancellation; it cannot undo dispatched input or immediately interrupt a hung Windows accessibility provider. Switching windows, app launching and the older direct Office-file commands are not exposed in this first desktop interface; those remain available through the CLI. The attendance demo is a deterministic simulator, not native computer control.
+
+Desktop profiles and history use a separate per-user app data directory (accessible from setup). API keys entered in the desktop app are stored as Windows-encrypted ciphertext, never in profile JSON; this differs from the CLI's environment-variable-only setup. Leaving the key blank preserves an existing saved key. Do not treat OS encryption as protection against software already running as your Windows user. Explicit per-task consent is required before cloud observation transfer. Task goals and outcome summaries are stored locally; screen images and full action traces are not saved in desktop history.
+
+The renderer has no Node access, remote content, generic shell IPC or network fetch capability. A sandboxed preload exposes an allowlisted bridge; the Python child communicates over private stdin/stdout. The controller's own approval window is excluded from native targets. Existing egress and native-action safeguards still apply; this is an experimental agent, not OS-wide network isolation.
+
+### Desktop checks and Windows packaging
+
+```powershell
+# From desktop/
+npm run build
+npm test
+npm run smoke
+# Browser-only UI fixture; install Playwright separately or set PLAYWRIGHT_MODULE.
+npm run test:ui
+
+# Build an unsigned portable app with a bundled Python runtime:
+python -m pip install pyinstaller
+npm run runtime
+$env:ELECTRON_BUILDER_COMPRESSION_LEVEL = "3" # faster local packaging
+npm run package
+npm run test:package
+```
+
+The portable build goes into `desktop/release/`. It includes Python but not Ollama, model weights or Tesseract. Windows may warn about the unsigned binary; no signing certificate or auto-updater is configured. Build output, local test data and dependencies are ignored by Git.
+
+Validation: 706 Python tests passed, 2 skipped; four bridge tests passed; renderer fixtures cover model setup, discovery, task start, approval-token forwarding, Stop and disconnect handling. The Electron smoke test checks the real renderer-to-Python connection, including the packaged executable. The frozen runtime completes the deterministic demo with Python and Ollama removed from PATH. Renderer action tests are mocked, not evidence of a successful native drawing run. The existing local-model accuracy limitations still apply. The production npm dependency audit was clean; eight moderate transitive findings remain in development packaging tools.
+
 ## Where a local 7B/8B model fits
 
 The model does **not** receive unlimited control of the computer. It selects from a small action vocabulary and returns a typed plan. DOM/accessibility data, OCR and explicit tool results provide observations; deterministic policy and verification code decide whether actions are allowed and successful. This makes a quantized 7B/8B model viable for a focused domain.

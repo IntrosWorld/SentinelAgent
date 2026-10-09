@@ -321,6 +321,10 @@ app.whenReady().then(async () => {
         "window.sentinel.call('status')",
       );
       const models = await agent.request("models.list");
+      writeJSON(path.join(data(), "smoke-result.json"), {
+        smoke: "passed", packaged: app.isPackaged, version: status.version,
+        profiles: models.profiles.length,
+      });
       console.log(
         JSON.stringify({
           smoke: "passed",

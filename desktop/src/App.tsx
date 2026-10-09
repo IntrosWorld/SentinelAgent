@@ -376,6 +376,8 @@ export default function App() {
                         setApiKey("");
                         await refresh();
                         setProfile(form.name);
+                        setVision(Boolean(form.vision));
+                        setCloud(false);
                         setNotice(
                           "Profile saved. Connection has not yet been tested.",
                         );

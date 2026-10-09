@@ -114,11 +114,12 @@ const server = http.createServer((req, res) => {
         token: "t1",
         details: {
           window: "Paint",
-          action: { kind: "drag", start: [100, 100], end: [200, 200] },
+          action: { kind: "drag", x: 100, y: 100, end_x: 200, end_y: 200 },
         },
       }),
     );
     await page.getByRole("button", { name: "Approve once" }).waitFor();
+    await page.getByText("Position (100, 100)", { exact: false }).waitFor();
     fs.mkdirSync(path.resolve(__dirname, "../test-results"), {
       recursive: true,
     });
