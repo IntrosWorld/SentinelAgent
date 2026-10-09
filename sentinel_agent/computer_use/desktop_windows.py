@@ -38,7 +38,7 @@ _BLOCKED_APPS = frozenset({
     "bash.exe", "wsl.exe", "mintty.exe", "regedit.exe", "mmc.exe", "taskmgr.exe",
     "systemsettings.exe", "sechealthui.exe", "credentialuibroker.exe", "logonui.exe",
     "consent.exe", "keepass.exe", "keepassxc.exe", "bitwarden.exe", "1password.exe",
-    "codex.exe", "chatgpt.exe",
+    "codex.exe", "chatgpt.exe", "sentinel desktop.exe",
 })
 _SENSITIVE_TITLE = re.compile(
     r"\b(?:codex|powershell|command prompt|windows terminal|password manager|"
@@ -251,7 +251,8 @@ class WindowsDesktopSession:
                 try:
                     app = dependencies.psutil.Process(window.process_id()).name()
                     title = window.window_text().strip()
-                    if title and not _blocked(app, title) and window.is_enabled():
+                    if (title and not _blocked(app, title) and window.is_enabled()
+                            and str(window.process_id()) != os.environ.get("SENTINEL_DESKTOP_HOST_PID")):
                         results.append({"window_id": int(window.handle), "app": app, "title": title})
                 except Exception:
                     continue
@@ -269,6 +270,8 @@ class WindowsDesktopSession:
         if not window.is_visible() or not window.is_enabled():
             raise DesktopFailure("Selected window is hidden, disabled, or has a modal dialog")
         process = dependencies.psutil.Process(window.process_id())
+        if str(window.process_id()) == os.environ.get("SENTINEL_DESKTOP_HOST_PID"):
+            raise DesktopFailure("The controller cannot operate its own approval window")
         identity = (window.process_id(), process.create_time(), process.name().casefold(),
                     tuple(window.element_info.element.GetRuntimeId()))
         if self._identity is not None and identity != self._identity:
