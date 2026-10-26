@@ -120,15 +120,8 @@ def test_corrupt_history_does_not_break_startup(tmp_path, contents):
     assert DesktopService(tmp_path, lambda _: None).history == []
 
 
-async def test_demo_completes_without_model_or_native_actions(service, monkeypatch):
-    monkeypatch.chdir(service.root)
-    result = await service.dispatch("run.start", {"mode": "demo", "goal": "Check attendance and create a report"})
-    for _ in range(200):
-        await asyncio.sleep(.01)
-        if service.pending and not service.pending[1].done():
-            await service.dispatch("run.approve", {"run_id": result["run_id"], "token": service.pending[0], "approved": True})
-        if service.running.done():
-            break
-    await service.close()
-    assert service.history[-1]["status"] == "completed"
-    assert any(e["event"] == "finished" for e in service.events)
+async def test_desktop_bridge_rejects_simulator_mode(service):
+    with pytest.raises(ValueError):
+        await service.dispatch("run.start", {"mode": "demo", "goal": "Check attendance and create a report"})
+    assert service.running is None
+    assert service.events == []

@@ -19,7 +19,7 @@ In **Models & setup**, enter an Ollama server URL (normally `http://127.0.0.1:11
 
 Ollama executable selection is optional: browse to `ollama.exe`, auto-detect it, or paste an absolute path. **Save path** then **Start Ollama** requests confirmation before launching that executable on loopback. An already-running server is not stopped. Models are installed separately through Ollama; the app does not silently download model weights. Tesseract on PATH is optional for OCR.
 
-Select an already-open permitted window, enter an instruction, and start. Single-step is enabled by default. Review each proposed input, then approve once or decline. **Expected result text** optionally verifies completion from the target's observed content. **Stop task** requests cancellation and cannot undo dispatched input or immediately interrupt a hung Windows accessibility provider. Switching windows and app launching remain CLI workflows. The attendance demo is a deterministic simulator.
+Select an already-open permitted window, enter an instruction, and start. Single-step is enabled by default. Review each proposed input, then approve once or decline. **Expected result text** optionally verifies completion from the target's observed content. **Stop task** requests cancellation and cannot undo dispatched input or immediately interrupt a hung Windows accessibility provider. Switching windows and app launching remain CLI workflows. The desktop interface exposes only native-window and real document workflows; simulator mode is rejected by the bridge.
 
 ### Word, Excel and PDF in the desktop conversation
 

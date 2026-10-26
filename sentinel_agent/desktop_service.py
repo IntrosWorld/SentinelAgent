@@ -27,7 +27,6 @@ from sentinel_agent.egress.proxy import ProxyLimits
 from sentinel_agent.models import ModelProfile, ModelRegistry
 
 
-DEMO_GOAL = "Check attendance and create a report"
 MAX_LINE = 64 * 1024
 
 
@@ -41,7 +40,7 @@ class Request(BaseModel):
 class StartRun(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     goal: str = Field(min_length=3, max_length=2000)
-    mode: Literal["desktop", "documents", "auto", "demo"] = "desktop"
+    mode: Literal["desktop", "documents", "auto"] = "desktop"
     profile: str = "local-vision"
     window_id: int = Field(default=0, ge=0)
     vision: bool = True
@@ -131,7 +130,7 @@ class DesktopService:
 
     async def dispatch(self, method: str, params: dict):
         if method == "status":
-            return {"version": "0.3.0", "workspace": str(self.root), "platform": sys.platform,
+            return {"version": "0.3.1", "workspace": str(self.root), "platform": sys.platform,
                     "ocr_available": shutil.which("tesseract") is not None,
                     "active_run": self.run_id if self.running and not self.running.done() else None}
         if method == "models.list":
@@ -198,8 +197,6 @@ class DesktopService:
                 documents.prepare(documents.plan(request.goal))
             if request.mode == "desktop" and request.window_id <= 0:
                 raise ValueError("Choose a target window")
-            if request.mode == "demo" and request.goal != DEMO_GOAL:
-                raise ValueError("Demo accepts only the included attendance example")
             # Validate before claiming a task has started or opening a session.
             if request.mode == "desktop":
                 DesktopPlanner(self.registry.get(request.profile), vision=request.vision, ocr=request.ocr,
@@ -226,7 +223,7 @@ class DesktopService:
         entry = {"id": run_id, "goal": request.goal, "mode": request.mode, "profile": request.profile,
                  "created": datetime.now(timezone.utc).isoformat(), "status": "running"}
         self.history.append(entry)
-        gateway, demo = None, None
+        gateway = None
         try:
             with suppress(OSError):
                 self.persist()
@@ -259,17 +256,6 @@ class DesktopService:
                     else:
                         outcome = {"status": "completed", "reason": "Document written and verified",
                                    "steps": 1, "trace": [], "artifacts": [artifact]}
-            elif request.mode == "demo":
-                from sentinel_agent.agent import SentinelAgent
-                from sentinel_agent.llm import planner_from_profile
-                from sentinel_agent.planner import HybridPlanner
-                demo = SentinelAgent(HybridPlanner(planner_from_profile(self.registry.get())))
-                result = await demo.start(DEMO_GOAL, use_model=False, live_desktop=False)
-                while str(result.status) == "waiting_approval":
-                    allowed = await self.approval({"mode": "demo", "action": result.pending_action.model_dump()})
-                    result = demo.approve(result.id, allowed)
-                outcome = {"status": str(result.status), "reason": "Demo finished", "steps": result.current_step,
-                           "trace": [e.model_dump() for e in result.events]}
             else:
                 profile = self.registry.get(request.profile)
                 planner = DesktopPlanner(profile, vision=request.vision, ocr=request.ocr,
@@ -311,8 +297,6 @@ class DesktopService:
         finally:
             if gateway:
                 gateway.close()
-            if demo:
-                demo.close()
             self.pending = None
             with suppress(OSError):
                 self.persist()

@@ -14,11 +14,17 @@ const bridge = new RuntimeBridge({
   try {
     assert.equal((await bridge.request('status')).version, require('../package.json').version);
     const completed = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(Error('Demo timed out')), 15000);
-      bridge.on('event', e => { if (e.event === 'finished') { clearTimeout(timer); resolve(e.result); } });
+      const timer = setTimeout(() => reject(Error('Document timed out')), 15000);
+      bridge.on('event', e => {
+        if (e.event === 'approval') bridge.request('run.approve', {run_id:e.run_id,token:e.token,approved:true}).catch(reject);
+        if (e.event === 'finished') { clearTimeout(timer); resolve(e.result); }
+      });
     });
-    await bridge.request('run.start', { goal: 'Check attendance and create a report', mode: 'demo' });
-    assert.equal((await completed).status, 'completed');
-    console.log('PASS: frozen runtime status and deterministic demo without Python/Ollama on PATH.');
+    await bridge.request('run.start', { goal: 'create frozen-smoke.pdf with content Real bundled runtime output', mode: 'documents' });
+    const result = await completed;
+    assert.equal(result.status, 'completed');
+    assert(result.artifacts[0].verified);
+    assert(fs.statSync(path.join(root,'artifacts','frozen-smoke.pdf')).size > 100);
+    console.log('PASS: frozen runtime creates a verified real PDF without Python/Ollama on PATH.');
   } finally { bridge.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

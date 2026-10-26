@@ -122,14 +122,14 @@ export default function App() {
     void act(refresh);
     return off;
   }, []);
-  async function start(demo = false) {
+  async function start() {
     await act(async () => {
-      const text = demo ? "Check attendance and create a report" : goal.trim();
+      const text = goal.trim();
       await call("run.start", {
         goal: text,
-        mode: demo ? "demo" : taskMode,
+        mode: taskMode,
         profile,
-        window_id: demo ? 0 : Number(windowId),
+        window_id: Number(windowId),
         vision,
         ocr: vision && ocr,
         single_step: single,
@@ -507,7 +507,7 @@ export default function App() {
               {task ? (
                 <>
                   <div className="eyebrow">
-                    {task.mode === "demo" ? "SIMULATED DEMO" : task.mode === "documents" ? "DOCUMENT TASK" : "DESKTOP TASK"} ·{" "}
+                    {task.mode === "documents" ? "DOCUMENT TASK" : "DESKTOP TASK"} ·{" "}
                     {task.status}
                   </div>
                   <h1>{task.goal}</h1>
@@ -617,9 +617,6 @@ export default function App() {
                   </p>
                   <button onClick={() => setPage("models")}>
                     Set up your model <ChevronRight size={15} />
-                  </button>
-                  <button disabled={busy} onClick={() => void start(true)}>
-                    Try the simulated attendance demo
                   </button>
                 </div>
               )}
