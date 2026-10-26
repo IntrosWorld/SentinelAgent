@@ -12,7 +12,7 @@ const bridge = new RuntimeBridge({
 });
 (async () => {
   try {
-    assert.equal((await bridge.request('status')).version, '0.2.0');
+    assert.equal((await bridge.request('status')).version, require('../package.json').version);
     const completed = new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(Error('Demo timed out')), 15000);
       bridge.on('event', e => { if (e.event === 'finished') { clearTimeout(timer); resolve(e.result); } });

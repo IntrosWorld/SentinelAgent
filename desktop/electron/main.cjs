@@ -128,6 +128,46 @@ async function startRuntime() {
   return current;
 }
 async function hostCall(method, params) {
+  const artifactsDirectory = () => {
+    const agentRoot = fs.realpathSync(path.join(data(), "agent"));
+    const folder = path.join(agentRoot, "artifacts");
+    fs.mkdirSync(folder, { recursive: true });
+    if (fs.realpathSync(folder) !== folder) throw Error("Invalid artifact directory");
+    return folder;
+  };
+  if (method === "host.showArtifacts") {
+    const error = await shell.openPath(artifactsDirectory());
+    if (error) throw Error("Output folder could not be opened");
+    return true;
+  }
+  if (method === "host.importDocument") {
+    const agent = await runtime();
+    if ((await agent.request("status")).active_run) throw Error("Stop the current task first");
+    const selected = await dialog.showOpenDialog(window, {
+      title: "Import a copy into the document workspace",
+      properties: ["openFile"],
+      filters: [{ name: "Documents", extensions: ["docx", "xlsx", "pdf"] }],
+    });
+    if (selected.canceled) return null;
+    const source = selected.filePaths[0];
+    if (!/\.(docx|xlsx|pdf)$/i.test(source) || fs.statSync(source).size > 25 * 1024 * 1024)
+      throw Error("Choose a document smaller than 25 MB");
+    const filename = path.basename(source).replace(/[^\w.-]/g, "_").replace(/^\.+/, "");
+    const target = path.join(artifactsDirectory(), filename);
+    fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
+    return { filename };
+  }
+  if (method === "host.openArtifact") {
+    const filename = params.filename;
+    if (typeof filename !== "string" || filename !== path.basename(filename) ||
+        !/\.(docx|xlsx|pdf)$/i.test(filename)) throw Error("Invalid document");
+    const root = artifactsDirectory();
+    const target = fs.realpathSync(path.join(root, filename));
+    if (path.dirname(target) !== root) throw Error("Invalid document path");
+    const error = await shell.openPath(target);
+    if (error) throw Error("Document could not be opened");
+    return true;
+  }
   if (method === "host.status")
     return {
       packaged: app.isPackaged,

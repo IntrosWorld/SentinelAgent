@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const folder = path.resolve(__dirname, '../.test-data/portable folder ' + randomUUID());
 fs.mkdirSync(folder, { recursive: true });
 const executable = path.join(folder, 'Sentinel.exe');
-fs.copyFileSync(path.resolve(__dirname, '../release/Sentinel-Desktop-0.2.0-Windows.exe'), executable);
+fs.copyFileSync(path.resolve(__dirname, '../release/Sentinel-Desktop-' + require('../package.json').version + '-Windows.exe'), executable);
 const root = path.join(folder, 'SentinelData');
 const env = { ...process.env };
 delete env.SENTINEL_DESKTOP_DATA;

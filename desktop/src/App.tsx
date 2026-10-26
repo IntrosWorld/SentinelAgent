@@ -57,6 +57,10 @@ export default function App() {
     [ollama, setOllama] = useState("");
   const [models, setModels] = useState<string[]>([]),
     [notice, setNotice] = useState("");
+  const [taskMode, setTaskMode] = useState("auto"),
+    [expectedText, setExpectedText] = useState("");
+  const documentTask = taskMode === "documents" ||
+    (taskMode === "auto" && /\.(docx|xlsx|pdf)\b/i.test(goal));
   const running = task?.status === "running";
   async function act(fn: () => Promise<void>) {
     setError("");
@@ -123,7 +127,7 @@ export default function App() {
       const text = demo ? "Check attendance and create a report" : goal.trim();
       await call("run.start", {
         goal: text,
-        mode: demo ? "demo" : "desktop",
+        mode: demo ? "demo" : taskMode,
         profile,
         window_id: demo ? 0 : Number(windowId),
         vision,
@@ -131,6 +135,7 @@ export default function App() {
         single_step: single,
         allow_cloud: cloud,
         max_seconds: 300,
+        expect_text: expectedText.trim() || null,
       });
       setPage("task");
       setGoal("");
@@ -502,7 +507,7 @@ export default function App() {
               {task ? (
                 <>
                   <div className="eyebrow">
-                    {task.mode === "demo" ? "SIMULATED DEMO" : "DESKTOP TASK"} ·{" "}
+                    {task.mode === "demo" ? "SIMULATED DEMO" : task.mode === "documents" ? "DOCUMENT TASK" : "DESKTOP TASK"} ·{" "}
                     {task.status}
                   </div>
                   <h1>{task.goal}</h1>
@@ -518,6 +523,16 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+                  {task.artifacts?.map((artifact: Data) => (
+                    <div className="panel" key={artifact.path}>
+                      <strong>{artifact.filename}</strong>
+                      <p>{artifact.bytes} bytes · File reopened and verified</p>
+                      <div className="actions">
+                        <button onClick={() => void act(async () => { await call("host.openArtifact", { filename: artifact.filename }); })}>Open file</button>
+                        <button onClick={() => void act(async () => { await call("host.showArtifacts"); })}>Show output folder</button>
+                      </div>
+                    </div>
+                  ))}
                   {approval && (
                     <div className="approval">
                       <div className="eyebrow">YOUR APPROVAL IS NEEDED</div>
@@ -532,6 +547,11 @@ export default function App() {
                           ? ` · ${approval.details.target.name}`
                           : ""}
                       </p>
+                      {approval.details.mode === "documents" && (
+                        <><p>{approval.details.output}</p>
+                        <p>{approval.details.replaces_existing ? "An existing file will be backed up before replacement." : "A new file will be created."}</p>
+                        <pre>{JSON.stringify(approval.details.action, null, 2)}</pre></>
+                      )}
                       {approval.details.action?.x !== undefined && (
                         <p>
                           Position ({approval.details.action.x},{" "}
@@ -607,7 +627,7 @@ export default function App() {
             <div className="composer">
               <textarea
                 aria-label="Task instruction"
-                placeholder="Describe what you want to do in the selected window…"
+                placeholder="Describe a desktop task, or create report.docx with content…"
                 value={goal}
                 disabled={running}
                 onChange={(e) => setGoal(e.target.value)}
@@ -650,7 +670,7 @@ export default function App() {
                     disabled={
                       busy ||
                       goal.trim().length < 3 ||
-                      !windowId ||
+                      (!documentTask && !windowId) ||
                       !status.version
                     }
                     onClick={() => void start()}
@@ -661,9 +681,20 @@ export default function App() {
               </div>
             </div>
             <div className="task-options">
+              <select aria-label="Task type" value={taskMode} disabled={running}
+                onChange={e => setTaskMode(e.target.value)}>
+                <option value="auto">Auto: desktop or documents</option>
+                <option value="desktop">Control a window</option>
+                <option value="documents">Create or edit documents</option>
+              </select>
+              <button disabled={busy || running} onClick={() => void act(async () => {
+                const imported = await call("host.importDocument");
+                if (imported) { setTaskMode("documents"); setNotice("Imported " + imported.filename + ". Use this filename in your instruction."); }
+              })}>Import document</button>
+              <button disabled={busy} onClick={() => void act(async () => { await call("host.showArtifacts"); })}>Output folder</button>
               <select
                 aria-label="Target window"
-                disabled={running}
+                disabled={running || documentTask}
                 value={windowId}
                 onChange={(e) => setWindowId(e.target.value)}
               >
@@ -710,6 +741,11 @@ export default function App() {
                 OCR
               </label>
             </div>
+            {documentTask ? <p className="hint">Examples: create report.docx with content Hello world; append report.pdf with content Appendix; set B3 to 42 in results.xlsx. For tables, use create results.xlsx with content {"{"}"headers":["Item","Value"],"rows":[["Sales",42]]{"}"}. Files stay in the output folder; import an existing document to edit it. No model or target window is required.</p> :
+              <label className="check">Expected result text (optional)
+                <input aria-label="Expected result text" value={expectedText} maxLength={300} disabled={running}
+                  onChange={e => setExpectedText(e.target.value)} placeholder="Text to verify in the target window" />
+              </label>}
             <label className="check consent">
               <input
                 type="checkbox"

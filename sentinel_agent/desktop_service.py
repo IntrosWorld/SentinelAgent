@@ -41,7 +41,7 @@ class Request(BaseModel):
 class StartRun(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     goal: str = Field(min_length=3, max_length=2000)
-    mode: Literal["desktop", "demo"] = "desktop"
+    mode: Literal["desktop", "documents", "auto", "demo"] = "desktop"
     profile: str = "local-vision"
     window_id: int = Field(default=0, ge=0)
     vision: bool = True
@@ -49,6 +49,7 @@ class StartRun(BaseModel):
     single_step: bool = True
     allow_cloud: bool = False
     max_seconds: float = Field(default=300.0, gt=0, le=900)
+    expect_text: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 def credential_name(name: str) -> str:
@@ -130,7 +131,7 @@ class DesktopService:
 
     async def dispatch(self, method: str, params: dict):
         if method == "status":
-            return {"version": "0.2.0", "workspace": str(self.root), "platform": sys.platform,
+            return {"version": "0.3.0", "workspace": str(self.root), "platform": sys.platform,
                     "ocr_available": shutil.which("tesseract") is not None,
                     "active_run": self.run_id if self.running and not self.running.done() else None}
         if method == "models.list":
@@ -189,6 +190,12 @@ class DesktopService:
         if method == "run.start":
             self.idle()
             request = StartRun.model_validate(params)
+            from sentinel_agent.desktop_documents import DesktopDocuments, is_document_goal
+            if request.mode == "auto":
+                request = request.model_copy(update={"mode": "documents" if is_document_goal(request.goal) else "desktop"})
+            if request.mode == "documents":
+                documents = DesktopDocuments(self.root)
+                documents.prepare(documents.plan(request.goal))
             if request.mode == "desktop" and request.window_id <= 0:
                 raise ValueError("Choose a target window")
             if request.mode == "demo" and request.goal != DEMO_GOAL:
@@ -224,7 +231,35 @@ class DesktopService:
             with suppress(OSError):
                 self.persist()
             self.event("started", task=entry.copy())
-            if request.mode == "demo":
+            if request.mode == "documents":
+                from sentinel_agent.desktop_documents import DesktopDocuments
+                documents = DesktopDocuments(self.root)
+                action = documents.plan(request.goal)
+                target = documents.path(action.arguments["filename"])
+                fingerprint = documents.fingerprint(target)
+                if action.name.startswith(("append_", "edit_")) and fingerprint is None:
+                    raise ValueError("Import or create the document first")
+                approved = await self.approval({
+                    "window": "Local document workspace", "mode": "documents",
+                    "action": {"kind": action.name, **action.arguments},
+                    "output": str(target), "replaces_existing": fingerprint is not None,
+                })
+                if not approved:
+                    outcome = {"status": "cancelled", "reason": "Document action declined", "steps": 0, "trace": []}
+                else:
+                    self.event("progress", message="Writing and reopening the document for verification")
+                    operation = asyncio.create_task(asyncio.to_thread(documents.execute, action, fingerprint))
+                    try:
+                        artifact = await asyncio.shield(operation)
+                    except asyncio.CancelledError:
+                        # A running file write is allowed to finish atomically before Stop completes.
+                        artifact = await operation
+                        outcome = {"status": "cancelled", "reason": "Stopped after the approved file write finished",
+                                   "steps": 1, "trace": [], "artifacts": [artifact]}
+                    else:
+                        outcome = {"status": "completed", "reason": "Document written and verified",
+                                   "steps": 1, "trace": [], "artifacts": [artifact]}
+            elif request.mode == "demo":
                 from sentinel_agent.agent import SentinelAgent
                 from sentinel_agent.llm import planner_from_profile
                 from sentinel_agent.planner import HybridPlanner
@@ -259,10 +294,13 @@ class DesktopService:
                     if approved:
                         await session.focus()
                     return approved
-                task = DesktopTask(goal=request.goal, single_step=request.single_step, max_seconds=request.max_seconds)
+                task = DesktopTask(goal=request.goal, expect_text=request.expect_text,
+                                   single_step=request.single_step, max_seconds=request.max_seconds)
                 with gateway.activate():
                     outcome = (await AdaptiveDesktopAgent(ReportingPlanner(), session, approve).run(task)).model_dump()
             entry.update(status=outcome["status"], reason=outcome["reason"], steps=outcome["steps"])
+            if outcome.get("artifacts"):
+                entry["artifacts"] = outcome["artifacts"]
             self.event("finished", result=outcome)
         except asyncio.CancelledError:
             entry.update(status="cancelled", reason="Stopped by user")
@@ -326,6 +364,7 @@ async def serve(root: Path, source, sink):
 
 def main():
     import argparse
+    import importlib
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, required=True)
     args = parser.parse_args()
@@ -333,6 +372,12 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     os.chdir(root)
     os.environ["SENTINEL_MODELS_FILE"] = str(root / "models.json")
+    # Initialize optional C-extension dependencies before the stdin reader starts.
+    # On Windows, numerical-library startup can acquire the CRT stream lock held
+    # by a concurrent blocking readline, stalling the private protocol.
+    for module in ("openpyxl", "docx", "pypdf", "reportlab.platypus"):
+        with suppress(ImportError):
+            importlib.import_module(module)
     # Third-party prints must never corrupt the private JSON protocol.
     sink, sys.stdout = sys.stdout, sys.stderr
     asyncio.run(serve(root, sys.stdin, sink))

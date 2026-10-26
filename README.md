@@ -9,7 +9,7 @@ The `desktop-application` branch adds the approved conversation interface using 
 From the repository root, with Node.js 22.12+ (tested with 24) and Python 3.11+:
 
 ```powershell
-python -m pip install -e ".[desktop,dev]"
+python -m pip install -e ".[desktop,documents,dev]"
 cd desktop
 npm ci
 npm start
@@ -19,7 +19,26 @@ In **Models & setup**, enter an Ollama server URL (normally `http://127.0.0.1:11
 
 Ollama executable selection is optional: browse to `ollama.exe`, auto-detect it, or paste an absolute path. **Save path** then **Start Ollama** requests confirmation before launching that executable on loopback. An already-running server is not stopped. Models are installed separately through Ollama; the app does not silently download model weights. Tesseract on PATH is optional for OCR.
 
-Select an already-open permitted window, enter an instruction, and start. Single-step is enabled by default. Review each proposed input, then approve once or decline. **Stop task** remains available in the top bar, including while viewing setup. It requests cancellation; it cannot undo dispatched input or immediately interrupt a hung Windows accessibility provider. Switching windows, app launching and the older direct Office-file commands are not exposed in this first desktop interface; those remain available through the CLI. The attendance demo is a deterministic simulator, not native computer control.
+Select an already-open permitted window, enter an instruction, and start. Single-step is enabled by default. Review each proposed input, then approve once or decline. **Expected result text** optionally verifies completion from the target's observed content. **Stop task** requests cancellation and cannot undo dispatched input or immediately interrupt a hung Windows accessibility provider. Switching windows and app launching remain CLI workflows. The attendance demo is a deterministic simulator.
+
+### Word, Excel and PDF in the desktop conversation
+
+**Auto** routes instructions containing a .docx, .xlsx or .pdf filename to local document operations. You can also select **Create or edit documents**. These operations need neither a model server nor a target window:
+
+```text
+create report.docx with content Weekly project summary
+append report.docx with content Next steps
+create report.pdf with content Project overview
+append report.pdf with content Appendix
+create results.xlsx with content {"headers":["Item","Value"],"rows":[["Sales",42]]}
+set B3 to 99 in results.xlsx
+```
+
+Review the operation, contents and destination, then **Approve once** or **Decline**. Word edits append paragraphs; PDF edits append pages; Excel edits set cells (including formulas, without recalculating them). The compact command parser currently uses simple filenames and the default Sheet1 sheet for cell edits; it does not implement arbitrary Word layout editing.
+
+**Import document** copies an existing file into the output folder and leaves its original unchanged. **Output folder**, **Open file** and **Show output folder** expose the real generated files. Outputs stay in the app's agent/artifacts folder. Existing files are backed up before atomic replacement, changed files require a fresh review, and each output is reopened with its format library before success is reported. A write already approved and running finishes atomically before Stop completes. No document content is sent to a model for these commands.
+
+The backend uses portable Python libraries (python-docx, openpyxl, reportlab, pypdf), bundled by the runtime packaging script. This path does not depend on Codex-installed tools. Verification checks file structure and readable content; it is not a visual layout review in Microsoft Office.
 
 Portable builds store profiles, history, credentials and Chromium session data in **`SentinelData` beside the executable**. Move the executable and that folder together, with the app closed, to keep your setup. The folder must be writable. Development/unpacked builds retain per-user AppData; `SENTINEL_DESKTOP_DATA` explicitly overrides either location. Existing AppData is not automatically moved or deleted. API keys are Windows-encrypted ciphertext, never in profile JSON, and normally need re-entering on a different Windows account or PC. Undecryptable keys no longer prevent local-model startup; originals are preserved. Leaving the key blank preserves an existing saved key. Do not treat OS encryption as protection against software already running as your Windows user. Explicit per-task consent is required before cloud observation transfer. Task goals and outcome summaries are stored locally; screen images and full action traces are not saved in desktop history.
 
@@ -34,6 +53,12 @@ npm test
 npm run smoke
 # Browser-only UI fixture; install Playwright separately or set PLAYWRIGHT_MODULE.
 npm run test:ui
+# Real private bridge and real files, without a model:
+npm run test:documents
+# Full Electron conversation, real Python and real document files:
+npm run test:documents:ui
+# From the repository root with Windows unlocked and local Ollama:
+python -m benchmark.native_service_smoke
 
 # Build an unsigned portable app with a bundled Python runtime:
 python -m pip install pyinstaller
@@ -45,7 +70,7 @@ npm run test:package
 
 The portable build goes into `desktop/release/`. Run the `.exe` directly without installing Python, Node.js or Sentinel. It includes Python but not Ollama, model weights or Tesseract. Re-select any machine-specific Ollama executable path after moving computers, or connect to an existing model server. The launcher extracts its runtime into a temporary directory while running; portable does not mean zero traces outside the folder. Windows may warn about the unsigned binary; no signing certificate or auto-updater is configured. Build output, local test data and dependencies are ignored by Git.
 
-Validation: 706 Python tests passed, 2 skipped; seven desktop unit tests passed; renderer fixtures cover model setup, discovery, task start, approval-token forwarding, Stop and disconnect handling. The Electron smoke test checks the real renderer-to-Python connection, including a relocated portable executable creating adjacent `SentinelData`. The frozen runtime completes the deterministic demo with Python and Ollama removed from PATH. Renderer action tests are mocked, not evidence of a successful native drawing run. The existing local-model accuracy limitations still apply. The production npm dependency audit was clean; eight moderate transitive findings remain in development packaging tools.
+Validation: document integration tests create and edit real DOCX, XLSX and PDF files through the desktop service, and the Electron test drives the actual conversation, IPC bridge, approvals and file outputs. Separate renderer fixtures cover native-task UI events. An opt-in native smoke harness uses a dedicated Win32 input fixture, local Ollama and expected-text readback; it requires Windows to be unlocked. Native drawing across arbitrary applications is not certified by document or renderer tests. The existing local-model accuracy limitations still apply.
 
 ## Where a local 7B/8B model fits
 

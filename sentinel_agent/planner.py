@@ -45,9 +45,9 @@ class HybridPlanner:
         if office_match:
             filename = office_match.group(1)
             extension = office_match.group(2).lower()
-            content_match = re.search(r"\bwith\s+content\s+(.+)$", instruction, re.IGNORECASE)
+            content_match = re.search(r"\bwith\s+content\s+(.+)$", instruction, re.IGNORECASE | re.DOTALL)
             content = content_match.group(1).strip(" \"'") if content_match else "Created by SentinelAgent."
-            is_edit = bool(re.search(r"\b(edit|append|add|update|set)\b", lower))
+            is_edit = bool(re.match(r"^\s*(edit|append|add|update|set)\b", lower))
             if extension == "xlsx":
                 if is_edit:
                     cell_match = re.search(
