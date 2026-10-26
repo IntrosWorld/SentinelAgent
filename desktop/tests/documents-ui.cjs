@@ -7,13 +7,15 @@ const assert = require("node:assert/strict");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "sentinel-electron-docs-"));
 (async () => {
   const application = await _electron.launch({
-    executablePath: require("electron"),
-    args: [path.resolve(__dirname, "..")],
+    executablePath: process.env.SENTINEL_ELECTRON_EXECUTABLE || require("electron"),
+    args: process.env.SENTINEL_ELECTRON_EXECUTABLE ? [] : [path.resolve(__dirname, "..")],
     env: {...process.env, SENTINEL_DESKTOP_DATA: root},
   });
   try {
     const page = await application.firstWindow();
     await page.getByText("Agent connected", {exact:true}).waitFor();
+    if (process.env.SENTINEL_ELECTRON_EXECUTABLE)
+      assert.equal(await page.evaluate(async () => (await window.sentinel.call("host.status")).packaged), true);
     for (const extension of ["docx", "xlsx", "pdf"]) {
       const filename = "electron-report." + extension;
       await page.getByLabel("Task instruction").fill("create " + filename + " with content Created through the real Electron app");
