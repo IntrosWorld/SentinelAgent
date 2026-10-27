@@ -10,8 +10,13 @@ kernel.GetModuleHandleW.restype = wintypes.HINSTANCE
 callback_type = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 user.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user.DefWindowProcW.restype = ctypes.c_ssize_t
+user.SetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+edit = None
 @callback_type
 def procedure(window, message, wparam, lparam):
+    if message == 0x0111 and (wparam & 0xFFFF) == 1 and edit:
+        user.SetWindowTextW(edit, "Button click verified")
+        return 0
     return user.DefWindowProcW(window, message, wparam, lparam)
 class WindowClass(ctypes.Structure):
     _fields_ = [("style", wintypes.UINT), ("procedure", callback_type),
@@ -37,13 +42,20 @@ if not window:
     raise ctypes.WinError(ctypes.get_last_error())
 user.CreateWindowExW(0, "STATIC", "Test input", 0x50000000,
     25, 30, 500, 25, window, None, None, None)
-user.CreateWindowExW(0x200, "EDIT", "", 0x50810004,
+edit = user.CreateWindowExW(0x200, "EDIT", "", 0x50810004,
     25, 65, 530, 120, window, None, None, None)
+user.CreateWindowExW(0, "BUTTON", "Insert greeting", 0x50010000,
+    25, 200, 180, 35, window, 1, instance, None)
+user.ShowWindow(window, 5)
+# A hidden-console launcher can override the first ShowWindow via STARTUPINFO.
+# The fixture's actual GUI must be visible for native input and window selection.
 user.ShowWindow(window, 5)
 user.UpdateWindow(window)
 user.SetForegroundWindow(window)
 print(int(window), flush=True)
 message = wintypes.MSG()
 while user.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+    if message.message == 0x0100 and message.wParam == 13:
+        user.SetWindowTextW(edit, "Keyboard input verified")
     user.TranslateMessage(ctypes.byref(message))
     user.DispatchMessageW(ctypes.byref(message))

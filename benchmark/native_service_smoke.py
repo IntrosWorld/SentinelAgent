@@ -10,7 +10,7 @@ from uuid import uuid4
 from sentinel_agent.desktop_service import DesktopService
 
 
-async def run():
+async def run(model="qwen3:1.7b", scenario="type"):
     import ctypes
     from ctypes import wintypes
     import psutil
@@ -28,6 +28,25 @@ async def run():
     try:
         window_id = int(await asyncio.wait_for(asyncio.to_thread(fixture.stdout.readline), 15))
         from sentinel_agent.computer_use.desktop_windows import WindowsDesktopSession
+        import sentinel_agent.desktop_service as service_module
+        class InstrumentedSession(WindowsDesktopSession):
+            async def focus(self):
+                try:
+                    return await super().focus()
+                except Exception as exc:
+                    print("Native focus:", str(exc), flush=True)
+                    raise
+            async def observe(self):
+                snapshot = await super().observe()
+                (root / "last-observation.json").write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+                return snapshot
+            async def validate(self, action):
+                try:
+                    return await super().validate(action)
+                except Exception as exc:
+                    print("Native validation:", str(exc), flush=True)
+                    raise
+        service_module.WindowsDesktopSession = InstrumentedSession
         diagnostic = WindowsDesktopSession(window_id, capture_images=False)
         await diagnostic.start()
         await diagnostic.observe()
@@ -35,11 +54,16 @@ async def run():
         events = []
         service = DesktopService(root, events.append)
         await service.dispatch("models.save", {
-            "name":"native-smoke", "provider":"ollama", "model":"qwen2.5-coder:7b",
+            "name":"native-smoke", "provider":"ollama", "model":model,
             "base_url":"http://127.0.0.1:11434", "vision":False, "timeout":120.0})
-        expected = "Sentinel native input verified"
+        scenarios = {
+            "type": ('Type exactly "Sentinel native input verified" into the editable Test input field.', "Sentinel native input verified"),
+            "click": ('Click the Insert greeting button once.', "Button click verified"),
+            "keyboard": ('Press the ENTER key once.', "Keyboard input verified"),
+        }
+        goal, expected = scenarios[scenario]
         await service.dispatch("run.start", {
-            "goal": 'Type exactly "' + expected + '" into the editable Test input field.',
+            "goal": goal,
             "mode":"desktop", "window_id":window_id, "profile":"native-smoke",
             "vision":False, "single_step":False, "expect_text":expected, "max_seconds":180.0})
         async def drive():
@@ -51,17 +75,25 @@ async def run():
             await service.running
         await asyncio.wait_for(drive(), 200)
         result = next(e["result"] for e in events if e["event"] == "finished")
-        evidence = {"model":"qwen2.5-coder:7b", "fixture":"real Win32 EDIT control",
+        evidence = {"model":model, "scenario":scenario, "fixture":"real Win32 controls",
                     "approval_events":sum(e["event"] == "approval" for e in events),
                     "result":result}
         (root / "native-result.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
         print(json.dumps(evidence, indent=2))
         print("Evidence:", root)
         assert result["status"] == "completed" and result["reason"] == "goal-verified", result
+        required_action = {"type":"type", "click":"click", "keyboard":"press_key"}[scenario]
+        assert any(item.get("kind") == "action" and item.get("action") == required_action
+                   for item in result["trace"]), "The requested native action was not dispatched"
     finally:
         fixture.terminate()
         fixture.wait(timeout=10)
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="qwen3:1.7b")
+    parser.add_argument("--scenario", choices=["type", "click", "keyboard"], default="type")
+    arguments = parser.parse_args()
+    asyncio.run(run(arguments.model, arguments.scenario))

@@ -1,0 +1,171 @@
+{
+  "verified_on": "2026-10-27",
+  "environment": "Windows 11, local Ollama on CPU",
+  "electron_conversation": {
+    "model": "qwen3:1.7b",
+    "mode": "desktop",
+    "status": "completed",
+    "reason": "goal-verified",
+    "steps": 1,
+    "path": "real Electron renderer, approval UI, private Python bridge, Windows input, observed text"
+  },
+  "scope": "Dedicated real Win32 controls; production desktop service and native input backend; automatic approval only for this owned test fixture",
+  "cases": [
+    {
+      "scenario": "type",
+      "model": "qwen3:1.7b",
+      "fixture": "real Win32 EDIT control",
+      "approval_events": 1,
+      "result": {
+        "status": "completed",
+        "reason": "goal-verified",
+        "steps": 1,
+        "trace": [
+          {
+            "kind": "observe",
+            "snapshot_id": "6e6K-J5mRBc8u6ZQgYznZuz3V2JsFhch",
+            "elements": 8
+          },
+          {
+            "kind": "decision",
+            "action": "type",
+            "snapshot_id": "6e6K-J5mRBc8u6ZQgYznZuz3V2JsFhch"
+          },
+          {
+            "kind": "approval",
+            "action": "type",
+            "approved": true
+          },
+          {
+            "kind": "action",
+            "action": "type",
+            "step": 1
+          },
+          {
+            "kind": "observe",
+            "snapshot_id": "pzW4FFT9SUIUE6o_njkxkMs0FEKicMpZ",
+            "elements": 8
+          },
+          {
+            "kind": "action_feedback",
+            "action": "type",
+            "step": 1,
+            "status": "changed",
+            "content_changed": true,
+            "controls_changed": false,
+            "geometry_changed": false,
+            "image_changed": null
+          },
+          {
+            "kind": "verify",
+            "matched": true
+          }
+        ]
+      }
+    },
+    {
+      "model": "qwen3:1.7b",
+      "scenario": "click",
+      "fixture": "real Win32 controls",
+      "approval_events": 1,
+      "result": {
+        "status": "completed",
+        "reason": "goal-verified",
+        "steps": 1,
+        "trace": [
+          {
+            "kind": "observe",
+            "snapshot_id": "oA081bjIzCpvQJlJFGZbUehnf0kgXWtJ",
+            "elements": 9
+          },
+          {
+            "kind": "decision",
+            "action": "click",
+            "snapshot_id": "oA081bjIzCpvQJlJFGZbUehnf0kgXWtJ"
+          },
+          {
+            "kind": "approval",
+            "action": "click",
+            "approved": true
+          },
+          {
+            "kind": "action",
+            "action": "click",
+            "step": 1
+          },
+          {
+            "kind": "observe",
+            "snapshot_id": "YoRZxi5H5iZeSNyLub406T7XtDggQs-n",
+            "elements": 9
+          },
+          {
+            "kind": "action_feedback",
+            "action": "click",
+            "step": 1,
+            "status": "changed",
+            "content_changed": true,
+            "controls_changed": false,
+            "geometry_changed": false,
+            "image_changed": null
+          },
+          {
+            "kind": "verify",
+            "matched": true
+          }
+        ]
+      }
+    },
+    {
+      "model": "qwen3:1.7b",
+      "scenario": "keyboard",
+      "fixture": "real Win32 controls",
+      "approval_events": 1,
+      "result": {
+        "status": "completed",
+        "reason": "goal-verified",
+        "steps": 1,
+        "trace": [
+          {
+            "kind": "observe",
+            "snapshot_id": "wqJ_1H_YFFdQ81k9Ux3faRr52hdbzO1b",
+            "elements": 9
+          },
+          {
+            "kind": "decision",
+            "action": "press_key",
+            "snapshot_id": "wqJ_1H_YFFdQ81k9Ux3faRr52hdbzO1b"
+          },
+          {
+            "kind": "approval",
+            "action": "press_key",
+            "approved": true
+          },
+          {
+            "kind": "action",
+            "action": "press_key",
+            "step": 1
+          },
+          {
+            "kind": "observe",
+            "snapshot_id": "k6AXrDAByfjm4JiyeXRR9JIci2EWPqJ9",
+            "elements": 9
+          },
+          {
+            "kind": "action_feedback",
+            "action": "press_key",
+            "step": 1,
+            "status": "changed",
+            "content_changed": true,
+            "controls_changed": false,
+            "geometry_changed": false,
+            "image_changed": null
+          },
+          {
+            "kind": "verify",
+            "matched": true
+          }
+        ]
+      }
+    }
+  ]
+}
