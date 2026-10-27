@@ -14,7 +14,9 @@ const env = { ...process.env };
 delete env.SENTINEL_DESKTOP_DATA;
 delete env.PORTABLE_EXECUTABLE_DIR;
 const result = spawnSync(executable, ['--smoke-test'], {
-  env, encoding: 'utf8', timeout: 60000,
+  // Cold extraction plus Windows scanning can exceed one minute. A fresh
+  // smoke marker below remains mandatory; waiting alone is never success.
+  env, encoding: 'utf8', timeout: 180000,
 });
 assert.equal(result.status, 0, 'Portable launcher failed or timed out');
 const evidence = JSON.parse(fs.readFileSync(path.join(root, 'smoke-result.json'), 'utf8'));
