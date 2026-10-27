@@ -32,6 +32,19 @@ const initial = {
   vision: true,
   desktop_coordinates: "auto",
 };
+const resultReason = (reason: string) =>
+  (
+    ({
+      "model-timeout":
+        "The model timed out. Choose a smaller model or increase its timeout in Models & setup.",
+      "model-key-missing":
+        "Configure the API key for this cloud model in Models & setup.",
+      "model-request-failed":
+        "The model request failed. Test the selected server and profile in Models & setup.",
+      "invalid-model-action":
+        "The model returned an invalid target or action. Review the window and try a more capable model.",
+    }) as Record<string, string>
+  )[reason] || reason;
 
 export default function App() {
   const [page, setPage] = useState("task"),
@@ -59,7 +72,8 @@ export default function App() {
     [notice, setNotice] = useState("");
   const [taskMode, setTaskMode] = useState("auto"),
     [expectedText, setExpectedText] = useState("");
-  const documentTask = taskMode === "documents" ||
+  const documentTask =
+    taskMode === "documents" ||
     (taskMode === "auto" && /\.(docx|xlsx|pdf)\b/i.test(goal));
   const running = task?.status === "running";
   async function act(fn: () => Promise<void>) {
@@ -104,7 +118,10 @@ export default function App() {
       if (e.event === "finished") {
         setTask((t) => (t ? { ...t, ...e.result } : t));
         setApproval(null);
-        setMessages((m) => [...m, `${e.result.status}: ${e.result.reason}`]);
+        setMessages((m) => [
+          ...m,
+          `${e.result.status}: ${resultReason(e.result.reason)}`,
+        ]);
         call("history.list")
           .then(setHistory)
           .catch(() => {});
@@ -507,8 +524,10 @@ export default function App() {
               {task ? (
                 <>
                   <div className="eyebrow">
-                    {task.mode === "documents" ? "DOCUMENT TASK" : "DESKTOP TASK"} ·{" "}
-                    {task.status}
+                    {task.mode === "documents"
+                      ? "DOCUMENT TASK"
+                      : "DESKTOP TASK"}{" "}
+                    · {task.status}
                   </div>
                   <h1>{task.goal}</h1>
                   <div className="user-message">{task.goal}</div>
@@ -528,8 +547,26 @@ export default function App() {
                       <strong>{artifact.filename}</strong>
                       <p>{artifact.bytes} bytes · File reopened and verified</p>
                       <div className="actions">
-                        <button onClick={() => void act(async () => { await call("host.openArtifact", { filename: artifact.filename }); })}>Open file</button>
-                        <button onClick={() => void act(async () => { await call("host.showArtifacts"); })}>Show output folder</button>
+                        <button
+                          onClick={() =>
+                            void act(async () => {
+                              await call("host.openArtifact", {
+                                filename: artifact.filename,
+                              });
+                            })
+                          }
+                        >
+                          Open file
+                        </button>
+                        <button
+                          onClick={() =>
+                            void act(async () => {
+                              await call("host.showArtifacts");
+                            })
+                          }
+                        >
+                          Show output folder
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -548,9 +585,17 @@ export default function App() {
                           : ""}
                       </p>
                       {approval.details.mode === "documents" && (
-                        <><p>{approval.details.output}</p>
-                        <p>{approval.details.replaces_existing ? "An existing file will be backed up before replacement." : "A new file will be created."}</p>
-                        <pre>{JSON.stringify(approval.details.action, null, 2)}</pre></>
+                        <>
+                          <p>{approval.details.output}</p>
+                          <p>
+                            {approval.details.replaces_existing
+                              ? "An existing file will be backed up before replacement."
+                              : "A new file will be created."}
+                          </p>
+                          <pre>
+                            {JSON.stringify(approval.details.action, null, 2)}
+                          </pre>
+                        </>
                       )}
                       {approval.details.action?.x !== undefined && (
                         <p>
@@ -678,17 +723,44 @@ export default function App() {
               </div>
             </div>
             <div className="task-options">
-              <select aria-label="Task type" value={taskMode} disabled={running}
-                onChange={e => setTaskMode(e.target.value)}>
+              <select
+                aria-label="Task type"
+                value={taskMode}
+                disabled={running}
+                onChange={(e) => setTaskMode(e.target.value)}
+              >
                 <option value="auto">Auto: desktop or documents</option>
                 <option value="desktop">Control a window</option>
                 <option value="documents">Create or edit documents</option>
               </select>
-              <button disabled={busy || running} onClick={() => void act(async () => {
-                const imported = await call("host.importDocument");
-                if (imported) { setTaskMode("documents"); setNotice("Imported " + imported.filename + ". Use this filename in your instruction."); }
-              })}>Import document</button>
-              <button disabled={busy} onClick={() => void act(async () => { await call("host.showArtifacts"); })}>Output folder</button>
+              <button
+                disabled={busy || running}
+                onClick={() =>
+                  void act(async () => {
+                    const imported = await call("host.importDocument");
+                    if (imported) {
+                      setTaskMode("documents");
+                      setNotice(
+                        "Imported " +
+                          imported.filename +
+                          ". Use this filename in your instruction.",
+                      );
+                    }
+                  })
+                }
+              >
+                Import document
+              </button>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void act(async () => {
+                    await call("host.showArtifacts");
+                  })
+                }
+              >
+                Output folder
+              </button>
               <select
                 aria-label="Target window"
                 disabled={running || documentTask}
@@ -738,11 +810,28 @@ export default function App() {
                 OCR
               </label>
             </div>
-            {documentTask ? <p className="hint">Examples: create report.docx with content Hello world; append report.pdf with content Appendix; set B3 to 42 in results.xlsx. For tables, use create results.xlsx with content {"{"}"headers":["Item","Value"],"rows":[["Sales",42]]{"}"}. Files stay in the output folder; import an existing document to edit it. No model or target window is required.</p> :
-              <label className="check">Expected result text (optional)
-                <input aria-label="Expected result text" value={expectedText} maxLength={300} disabled={running}
-                  onChange={e => setExpectedText(e.target.value)} placeholder="Text to verify in the target window" />
-              </label>}
+            {documentTask ? (
+              <p className="hint">
+                Examples: create report.docx with content Hello world; append
+                report.pdf with content Appendix; set B3 to 42 in results.xlsx.
+                For tables, use create results.xlsx with content {"{"}
+                "headers":["Item","Value"],"rows":[["Sales",42]]{"}"}. Files
+                stay in the output folder; import an existing document to edit
+                it. No model or target window is required.
+              </p>
+            ) : (
+              <label className="check">
+                Expected result text (optional)
+                <input
+                  aria-label="Expected result text"
+                  value={expectedText}
+                  maxLength={300}
+                  disabled={running}
+                  onChange={(e) => setExpectedText(e.target.value)}
+                  placeholder="Text to verify in the target window"
+                />
+              </label>
+            )}
             <label className="check consent">
               <input
                 type="checkbox"

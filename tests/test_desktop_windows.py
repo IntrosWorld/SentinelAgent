@@ -39,7 +39,7 @@ def rig():
     )
     process = SimpleNamespace(create_time=Mock(return_value=1.25), name=Mock(return_value="example.exe"))
     api = SimpleNamespace(
-        pixels=lambda: nullcontext(), foreground=Mock(return_value=True), popup=Mock(return_value=False),
+        pixels=lambda: nullcontext(), foreground=Mock(return_value=True), activate=Mock(), popup=Mock(return_value=False),
         modifiers_released=Mock(return_value=True), rect=Mock(return_value=(10, 20, 310, 220)),
         screen=Mock(return_value=(0, 0, 1000, 1000)), uncovered=Mock(return_value=True),
         point_window=Mock(return_value=123), dpi=Mock(return_value=96), type_unicode=Mock(),
@@ -61,6 +61,24 @@ def rig():
 async def opened(rig):
     await rig.session.start()
     return await rig.session.observe()
+
+
+async def test_proposal_can_be_reviewed_after_focus_loss_but_input_still_refused(rig):
+    snapshot = await opened(rig)
+    action = DesktopAction(kind="click", snapshot_id=snapshot.id, element_id=snapshot.elements[0].id)
+    rig.api.foreground.return_value = False
+    await rig.session.validate_proposal(action)
+    with pytest.raises(DesktopFailure, match="lost focus"):
+        await rig.session.validate(action)
+    with pytest.raises(DesktopFailure, match="lost focus"):
+        await rig.session.act(action)
+    rig.dependencies.mouse.click.assert_not_called()
+
+
+async def test_proposal_still_rejects_unobserved_target(rig):
+    snapshot = await opened(rig)
+    with pytest.raises(ValueError):
+        await rig.session.validate_proposal(DesktopAction(kind="click", snapshot_id=snapshot.id, element_id="invented"))
 
 
 async def test_controller_window_cannot_approve_itself(rig, monkeypatch):
@@ -294,6 +312,7 @@ async def test_explicit_post_approval_focus_rechecks_identity_and_preserves_ids(
     rig.window.set_focus.side_effect = lambda: setattr(rig.api.foreground, "return_value", True)
     await rig.session.focus()
     rig.window.set_focus.assert_called_once()
+    rig.api.activate.assert_called_once_with(123)
     assert rig.session._snapshot.id == snapshot.id
     await rig.session.act(action(snapshot))
 

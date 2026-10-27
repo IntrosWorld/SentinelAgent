@@ -59,6 +59,10 @@ npm run test:documents
 npm run test:documents:ui
 # From the repository root with Windows unlocked and local Ollama:
 python -m benchmark.native_service_smoke
+python -m benchmark.native_service_smoke --scenario click
+python -m benchmark.native_service_smoke --scenario keyboard
+# Real native task through the Electron conversation and approval UI:
+npm --prefix desktop run test:native:ui
 
 # Build an unsigned portable app with a bundled Python runtime:
 python -m pip install pyinstaller
@@ -70,7 +74,11 @@ npm run test:package
 
 The portable build goes into `desktop/release/`. Run the `.exe` directly without installing Python, Node.js or Sentinel. It includes Python but not Ollama, model weights or Tesseract. Re-select any machine-specific Ollama executable path after moving computers, or connect to an existing model server. The launcher extracts its runtime into a temporary directory while running; portable does not mean zero traces outside the folder. Windows may warn about the unsigned binary; no signing certificate or auto-updater is configured. Build output, local test data and dependencies are ignored by Git.
 
-Validation: document integration tests create and edit real DOCX, XLSX and PDF files through the desktop service, and the Electron test drives the actual conversation, IPC bridge, approvals and file outputs. Separate renderer fixtures cover native-task UI events. An opt-in native smoke harness uses a dedicated Win32 input fixture, local Ollama and expected-text readback; it requires Windows to be unlocked. Native drawing across arbitrary applications is not certified by document or renderer tests. The existing local-model accuracy limitations still apply.
+Validation: document integration tests create and edit real DOCX, XLSX and PDF files through the desktop service, and the Electron test drives the actual conversation, IPC bridge, approvals and file outputs. Live native tests passed on 27 October 2026 using local Ollama and qwen3:1.7b: real Windows typing, a button click and an Enter key event each changed a dedicated Win32 test app, followed by independent content verification. A separate real Electron conversation test also passed native typing through its approval UI. Machine-readable evidence is in benchmark/native-live-results.json. These tests require Windows to be unlocked.
+
+Live testing exposed and fixed two production issues: saved loopback model profiles incorrectly demanded API keys, and foreground focus could be lost while the model planned. Proposals now reach review without foreground ownership, while approval reacquires the selected window and live focus, identity, freshness and geometry are still checked before input. Timeouts and missing cloud keys produce actionable UI messages.
+
+These results cover the named controls and tasks, not arbitrary Paint drawing or every application's interface. The 7B model exceeded its 120-second CPU request timeout during testing; the 0.6B model selected incorrect controls. Parameter count alone does not establish computer-use accuracy. The passing native scenarios currently use accessibility observations without screenshots.
 
 ## Where a local 7B/8B model fits
 

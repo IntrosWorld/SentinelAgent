@@ -130,7 +130,7 @@ class DesktopService:
 
     async def dispatch(self, method: str, params: dict):
         if method == "status":
-            return {"version": "0.3.1", "workspace": str(self.root), "platform": sys.platform,
+            return {"version": "0.3.2", "workspace": str(self.root), "platform": sys.platform,
                     "ocr_available": shutil.which("tesseract") is not None,
                     "active_run": self.run_id if self.running and not self.running.done() else None}
         if method == "models.list":

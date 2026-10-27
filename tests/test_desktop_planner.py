@@ -619,9 +619,23 @@ async def test_provider_responses_use_egress_client(monkeypatch, tmp_path, provi
 
 async def test_missing_api_key_fails_before_networking(monkeypatch):
     monkeypatch.delenv("MISSING_DESKTOP_TEST_KEY", raising=False)
-    planner = DesktopPlanner(profile(api_key_env="MISSING_DESKTOP_TEST_KEY"))
+    planner = DesktopPlanner(profile("anthropic", base_url="https://api.anthropic.com",
+                                     api_key_env="MISSING_DESKTOP_TEST_KEY"),
+                             allow_cloud_observations=True)
     with pytest.raises(DesktopPlanningError, match="not configured"):
         await planner.next_action("Inspect", snapshot(), [])
+
+
+@pytest.mark.parametrize("provider", ["ollama", "openai_compatible"])
+def test_saved_loopback_profiles_do_not_require_optional_api_key(monkeypatch, provider):
+    from sentinel_agent.desktop_service import validated_profile
+    saved = validated_profile({"name": "local-test", "provider": provider,
+                               "model": "local-model", "base_url": "http://127.0.0.1:11434"})
+    monkeypatch.delenv(saved.api_key_env, raising=False)
+    planner = DesktopPlanner(saved, vision=False)
+    url, headers = planner._request()
+    assert url.startswith("http://127.0.0.1:11434/")
+    assert headers == {}
 
 
 async def test_invalid_provider_output_does_not_leak_private_content(monkeypatch, tmp_path):

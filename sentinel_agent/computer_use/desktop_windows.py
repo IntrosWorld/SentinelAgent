@@ -79,6 +79,7 @@ class _WindowsApi:
         self.advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
         for name, args, result in (
             ("GetForegroundWindow", [], wintypes.HWND),
+            ("SetForegroundWindow", [wintypes.HWND], wintypes.BOOL),
             ("GetAncestor", [wintypes.HWND, wintypes.UINT], wintypes.HWND),
             ("GetLastActivePopup", [wintypes.HWND], wintypes.HWND),
             ("WindowFromPoint", [wintypes.POINT], wintypes.HWND),
@@ -150,6 +151,9 @@ class _WindowsApi:
 
     def foreground(self, handle):
         return int(self.user32.GetForegroundWindow() or 0) == handle
+
+    def activate(self, handle):
+        self.user32.SetForegroundWindow(handle)
 
     def popup(self, handle):
         return int(self.user32.GetLastActivePopup(handle) or 0) != handle
@@ -287,7 +291,11 @@ class WindowsDesktopSession:
         if not api.foreground(self.window_id):
             if not allow_focus:
                 raise DesktopFailure("Selected window lost focus; input stopped")
+            api.activate(self.window_id)
             window.set_focus()
+            deadline = time.monotonic() + 0.5
+            while not api.foreground(self.window_id) and time.monotonic() < deadline:
+                time.sleep(0.02)
             if not api.foreground(self.window_id):
                 raise DesktopFailure("Selected window could not receive focus")
         if not api.modifiers_released():
@@ -472,6 +480,18 @@ class WindowsDesktopSession:
             raise
         except Exception:
             raise DesktopFailure("Desktop action could not be validated") from None
+
+    async def validate_proposal(self, action: DesktopAction):
+        """Check the observed proposal without requiring foreground ownership.
+
+        No input is dispatched here. The operator may be reading the controller
+        while the model responds. Approval reacquires focus; validate() and
+        act() then independently recheck live identity, content and geometry.
+        """
+        self._assert_thread()
+        if self._snapshot is None or action.snapshot_id != self._snapshot.id:
+            raise StaleDesktopObservation("Desktop observation expired; observe again")
+        validate_desktop_action(action, self._snapshot)
 
     async def act(self, action: DesktopAction):
         try:

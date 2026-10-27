@@ -26,6 +26,9 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 class DesktopPlanningError(RuntimeError):
     """Value-free diagnostic: never echo screenshots, model output or secrets."""
+    def __init__(self, message, code="planner-error"):
+        super().__init__(message)
+        self.code = code
 
 
 class DesktopPlanner:
@@ -219,6 +222,8 @@ class DesktopPlanner:
             "leave the selected window, or use credentials, payments, security "
             "prompts, terminals or command launchers. Executor approval is separate.\n"
             "Use current element_id when available; otherwise locate a visible target. "
+            "For text entry, use type directly on an editable control; it focuses the field. "
+            "Do not click title-bar, minimize, maximize, or close controls unless the user goal requests that operation. "
             + coordinates +
             "Never invent IDs. Reobserve after "
             "each action; do not blindly repeat failures. Finish proposes completion, "
@@ -301,8 +306,15 @@ class DesktopPlanner:
     def _request(self):
         provider = self.profile.provider
         key = self.profile.api_key
-        if self.profile.api_key_env and not key:
-            raise DesktopPlanningError("Required model API key is not configured")
+        host = urlsplit(self.base_url).hostname
+        local_endpoint = host == "localhost"
+        try:
+            local_endpoint = local_endpoint or ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            pass
+        key_optional = local_endpoint and provider in {"ollama", "openai_compatible"}
+        if self.profile.api_key_env and not key and not key_optional:
+            raise DesktopPlanningError("Required model API key is not configured", "model-key-missing")
         if provider == "ollama":
             return self.base_url + "/api/chat", ({"Authorization": "Bearer " + key} if key else {})
         if provider == "openai_compatible":
@@ -363,7 +375,7 @@ class DesktopPlanner:
             validate_desktop_action(action, snapshot)
             return action
         except (ValueError, TypeError, AttributeError):
-            raise DesktopPlanningError("Model returned an invalid or ungrounded desktop action") from None
+            raise DesktopPlanningError("Model returned an invalid or ungrounded desktop action", "invalid-model-action") from None
 
     async def next_action(self, goal, snapshot, history):
         self.last_metrics = {}
@@ -395,6 +407,9 @@ class DesktopPlanner:
                 response_text = next(item["text"] for item in body["content"] if item["type"] == "text")
             else:
                 response_text = body["candidates"][0]["content"]["parts"][0]["text"]
-        except (EgressError, KeyError, IndexError, StopIteration, ValueError, TypeError):
+        except EgressError as exc:
+            code = "model-timeout" if "Timeout" in str(exc) or "timeout" in str(exc) else "model-request-failed"
+            raise DesktopPlanningError("Desktop model request failed", code) from None
+        except (KeyError, IndexError, StopIteration, ValueError, TypeError):
             raise DesktopPlanningError("Desktop model request failed or returned an invalid response") from None
         return self.parse_action(response_text, snapshot)

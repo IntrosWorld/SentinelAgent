@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from sentinel_agent.computer_use.desktop_planner import DesktopPlanningError
 
 from sentinel_agent.computer_use.desktop_schema import (
     DesktopAction, DesktopFailure, DesktopResult, DesktopSnapshot, DesktopTask,
@@ -126,6 +127,8 @@ class AdaptiveDesktopAgent:
                         proposal = await bounded(self.planner.next_action(task.goal, snapshot, trace[-8:]))
                     except TimeoutError:
                         raise
+                    except DesktopPlanningError as exc:
+                        return result("failed", exc.code)
                     except Exception:
                         return result("failed", "planner-error")
                     try:
@@ -144,7 +147,9 @@ class AdaptiveDesktopAgent:
                         # A no-op is not proof of failure, but blind repeated
                         # clicks/typing can become harmful if effects are delayed.
                         return result("needs_review", "repeated-unchanged-action")
-                    await bounded(self.session.validate(action))
+                    proposal_check = (getattr(self.session, "validate_proposal", self.session.validate)
+                                      if action.kind != "wait" else self.session.validate)
+                    await bounded(proposal_check(action))
                     if action.kind != "wait":
                         approved = self.approve is not None and await bounded(self.approve(action, snapshot))
                         trace.append({"kind": "approval", "action": action.kind, "approved": approved is True})

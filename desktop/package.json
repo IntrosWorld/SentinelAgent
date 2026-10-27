@@ -1,6 +1,6 @@
 {
   "name": "sentinel-desktop",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "description": "Local-first desktop control with reviewed actions",
@@ -13,6 +13,7 @@
     "test:ui": "node tests/ui.cjs",
     "test:documents": "node tests/documents.cjs",
     "test:documents:ui": "node tests/documents-ui.cjs",
+    "test:native:ui": "node tests/native-ui.cjs",
     "test:package": "node tests/packaged.cjs",
     "runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime.ps1",
     "smoke": "npm run build && electron . --smoke-test",
