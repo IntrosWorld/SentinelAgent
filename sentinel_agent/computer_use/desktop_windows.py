@@ -211,8 +211,14 @@ class _WindowsApi:
                 inputs[index * 2 + offset].payload.ki = KeyboardInput(0, unit, flags, 0, 0)
         self.user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(Input), ctypes.c_int]
         self.user32.SendInput.restype = wintypes.UINT
-        if inputs and self.user32.SendInput(len(inputs), inputs, ctypes.sizeof(Input)) != len(inputs):
-            raise DesktopFailure("Text input was not fully dispatched; do not retry automatically")
+        # Modern Notepad's RichEdit can misread a bulk VK_PACKET stream as
+        # repeated final characters. Pace complete UTF-16 key pairs so its
+        # message loop consumes each packet before the next one arrives.
+        for index in range(len(units)):
+            pair = (Input * 2)(inputs[index * 2], inputs[index * 2 + 1])
+            if self.user32.SendInput(2, pair, ctypes.sizeof(Input)) != 2:
+                raise DesktopFailure("Text input was not fully dispatched; do not retry automatically")
+            time.sleep(0.01)
 
 
 class WindowsDesktopSession:

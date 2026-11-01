@@ -130,7 +130,7 @@ class DesktopService:
 
     async def dispatch(self, method: str, params: dict):
         if method == "status":
-            return {"version": "0.3.2", "workspace": str(self.root), "platform": sys.platform,
+            return {"version": "0.3.3", "workspace": str(self.root), "platform": sys.platform,
                     "ocr_available": shutil.which("tesseract") is not None,
                     "active_run": self.run_id if self.running and not self.running.done() else None}
         if method == "models.list":
@@ -190,15 +190,17 @@ class DesktopService:
             self.idle()
             request = StartRun.model_validate(params)
             from sentinel_agent.desktop_documents import DesktopDocuments, is_document_goal
+            from sentinel_agent.desktop_launch import launch_intent
+            launch = launch_intent(request.goal) if request.mode != "documents" else None
             if request.mode == "auto":
-                request = request.model_copy(update={"mode": "documents" if is_document_goal(request.goal) else "desktop"})
+                request = request.model_copy(update={"mode": "documents" if not launch and is_document_goal(request.goal) else "desktop"})
             if request.mode == "documents":
                 documents = DesktopDocuments(self.root)
                 documents.prepare(documents.plan(request.goal))
-            if request.mode == "desktop" and request.window_id <= 0:
+            if request.mode == "desktop" and request.window_id <= 0 and not launch:
                 raise ValueError("Choose a target window")
             # Validate before claiming a task has started or opening a session.
-            if request.mode == "desktop":
+            if request.mode == "desktop" and not launch:
                 DesktopPlanner(self.registry.get(request.profile), vision=request.vision, ocr=request.ocr,
                                allow_cloud_observations=request.allow_cloud)
             self.run_id = uuid4().hex
@@ -228,6 +230,35 @@ class DesktopService:
             with suppress(OSError):
                 self.persist()
             self.event("started", task=entry.copy())
+            from sentinel_agent.desktop_launch import launch_intent, launch_app
+            launch = launch_intent(request.goal) if request.mode == "desktop" else None
+            if launch:
+                app, text = launch
+                approved = await self.approval({"window": "Windows application launcher",
+                    "action": {"kind": "open_app", "app": app, "text": text}})
+                if not approved:
+                    raise asyncio.CancelledError()
+                # Short process creation runs inline so Stop cannot leave an untracked
+                # background launch racing the next task.
+                hint = launch_app(self.root, app)
+                if not text:
+                    outcome = {"status": "completed", "reason": "Application launch requested",
+                               "steps": 1, "trace": []}
+                    entry.update(status=outcome["status"], reason=outcome["reason"], steps=1)
+                    self.event("finished", result=outcome)
+                    return
+                self.event("progress", message="Waiting for the new Notepad scratch window")
+                for _ in range(60):
+                    matches = [w for w in WindowsDesktopSession.list_windows()
+                               if w["app"].lower() == "notepad.exe" and hint in w["title"]]
+                    if len(matches) == 1:
+                        break
+                    await asyncio.sleep(0.25)
+                else:
+                    raise ValueError("The new Notepad window could not be uniquely identified")
+                request = request.model_copy(update={"window_id": matches[0]["window_id"],
+                    "goal": "Type this literal text into the document: " + text,
+                    "expect_text": text[:300], "vision": False})
             if request.mode == "documents":
                 from sentinel_agent.desktop_documents import DesktopDocuments
                 documents = DesktopDocuments(self.root)
@@ -257,7 +288,8 @@ class DesktopService:
                         outcome = {"status": "completed", "reason": "Document written and verified",
                                    "steps": 1, "trace": [], "artifacts": [artifact]}
             else:
-                profile = self.registry.get(request.profile)
+                profile = (ModelProfile(name="literal-notepad", provider="ollama", model="unused",
+                           base_url="http://127.0.0.1:11434") if launch else self.registry.get(request.profile))
                 planner = DesktopPlanner(profile, vision=request.vision, ocr=request.ocr,
                                          allow_cloud_observations=request.allow_cloud)
                 canonical = profile.model_copy(update={"base_url": planner.base_url})
@@ -268,6 +300,18 @@ class DesktopService:
                 class ReportingPlanner:
                     async def next_action(self, goal, snapshot, history):
                         service.event("progress", message="Observing and planning", elements=len(snapshot.elements))
+                        if launch:
+                            from sentinel_agent.computer_use.desktop_schema import DesktopAction, DesktopFailure
+                            # Explicit literal entry needs no inference. Ground the
+                            # proposal in a unique current editable document control.
+                            targets = [e for e in snapshot.elements if e.editable and e.enabled
+                                       and not e.password and e.role.casefold() in {"document", "edit"}]
+                            if len(targets) != 1:
+                                raise DesktopFailure("Notepad editor is not unambiguous")
+                            if any(item.get("kind") == "action" for item in history):
+                                return DesktopAction(kind="finish", snapshot_id=snapshot.id)
+                            return DesktopAction(kind="type", snapshot_id=snapshot.id,
+                                                 element_id=targets[0].id, text=launch[1])
                         return await planner.next_action(goal, snapshot, history)
                 async def approve(action, snapshot):
                     if action.text is not None:

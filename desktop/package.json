@@ -1,6 +1,6 @@
 {
   "name": "sentinel-desktop",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "type": "module",
   "description": "Local-first desktop control with reviewed actions",

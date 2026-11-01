@@ -76,6 +76,7 @@ export default function App() {
     taskMode === "documents" ||
     (taskMode === "auto" && /\.(docx|xlsx|pdf)\b/i.test(goal));
   const running = task?.status === "running";
+  const launchTask = taskMode !== "documents" && /^\s*(open|launch|start)\s+(notepad|calculator)(?:\s+and\s+(write|type)\s+.+)?\s*$/is.test(goal);
   async function act(fn: () => Promise<void>) {
     setError("");
     setBusy(true);
@@ -712,7 +713,7 @@ export default function App() {
                     disabled={
                       busy ||
                       goal.trim().length < 3 ||
-                      (!documentTask && !windowId) ||
+                      (!documentTask && !launchTask && !windowId) ||
                       !status.version
                     }
                     onClick={() => void start()}
