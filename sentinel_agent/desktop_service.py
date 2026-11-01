@@ -322,6 +322,9 @@ class DesktopService:
                     approved = await self.approval({"window": snapshot.title, "action": action.model_dump(exclude_none=True),
                                                     "target": target.model_dump() if target else None})
                     if approved:
+                        # Let the Electron approval click finish its activation
+                        # before transferring foreground to the target window.
+                        await asyncio.sleep(0.2)
                         await session.focus()
                     return approved
                 task = DesktopTask(goal=request.goal, expect_text=request.expect_text,

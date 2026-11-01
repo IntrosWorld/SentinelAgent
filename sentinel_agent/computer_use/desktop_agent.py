@@ -185,7 +185,16 @@ class AdaptiveDesktopAgent:
             return result("failed", "time-limit")
         except asyncio.CancelledError:
             return result("cancelled", "cancelled")
-        except DesktopFailure:
+        except DesktopFailure as exc:
+            diagnostics = {
+                "Selected window is covered by another window": "window-covered",
+                "Selected window lost focus; input stopped": "focus-lost",
+                "Observed editable target did not receive keyboard focus": "editor-not-focused",
+                "Selected desktop window could not be reactivated": "focus-reacquisition-failed",
+                "Selected desktop window is unavailable": "window-unavailable",
+                "Desktop input outcome is uncertain; do not retry automatically": "input-uncertain",
+            }
+            trace.append({"kind": "desktop_failure", "detail": diagnostics.get(str(exc), "native-check-failed")})
             return result("failed", "desktop-error")
         except Exception:
             return result("failed", "runtime-error")
