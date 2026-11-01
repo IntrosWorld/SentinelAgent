@@ -11,17 +11,22 @@ from uuid import uuid4
 from xml.sax.saxutils import escape
 
 from sentinel_agent.planner import HybridPlanner
+from sentinel_agent.schemas import Action
 
-OPERATIONS = {"create_docx", "append_docx", "create_pdf", "append_pdf", "create_xlsx", "edit_xlsx"}
+TEXT_EXTENSIONS = {".txt", ".md", ".js", ".html", ".css", ".ts", ".json", ".py", ".jsx", ".tsx", ".xml", ".yaml", ".yml", ".csv", ".svg"}
+OPERATIONS = {"create_docx", "append_docx", "create_pdf", "append_pdf", "create_xlsx", "edit_xlsx", "create_text", "append_text"}
 
 
 def is_document_goal(goal: str) -> bool:
-    return bool(re.search(r"\.(?:docx|xlsx|pdf)\b", goal, re.I))
+    extensions = "|".join(ext[1:] for ext in TEXT_EXTENSIONS | {".docx", ".xlsx", ".pdf"})
+    return bool(re.search(r"\.(?:" + extensions + r")\b", goal, re.I))
 
 
 class DesktopDocuments:
     @staticmethod
     def prepare(action):
+        if action.name in {"create_text", "append_text"}:
+            return
         # Some Windows numerical extensions cannot initialize on a worker thread.
         # Load optional format dependencies on the service thread before dispatch.
         if action.name.endswith("xlsx"):
@@ -42,14 +47,23 @@ class DesktopDocuments:
     def path(self, filename: str) -> Path:
         if (Path(filename).name != filename or "/" in filename or "\\" in filename
                 or ":" in filename or filename.startswith(".")
-                or Path(filename).suffix.lower() not in {".docx", ".xlsx", ".pdf"}):
-            raise ValueError("Use a simple .docx, .xlsx or .pdf filename")
+                or filename.rstrip(" .") != filename
+                or re.search(r'[<>"|?*\x00-\x1f]', filename)
+                or filename.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+                or Path(filename).suffix.lower() not in TEXT_EXTENSIONS | {".docx", ".xlsx", ".pdf"}):
+            raise ValueError("Use a simple supported document or source filename")
         target = self.root / filename
         if target.resolve().parent != self.root or target.is_symlink():
             raise ValueError("Document must stay in the artifacts folder")
         return target
 
     def plan(self, goal: str):
+        text = re.fullmatch(r"\s*(create|make|append|replace|overwrite)\s+(\S+?)(?:\s+with\s+content(?: |\r?\n)([\s\S]*))?\s*", goal, re.I)
+        if text and Path(text[2]).suffix.lower() in TEXT_EXTENSIONS:
+            self.path(text[2])
+            return Action(name="append_text" if text[1].lower() == "append" else "create_text",
+                          arguments={"filename": text[2], "content": text[3] or ""},
+                          expected_result="UTF-8 file content verified")
         if not re.match(r"^\s*(?:create|make|append|add|edit|update|set)\b", goal, re.I):
             raise ValueError("Use create, append, or set with an explicit filename")
         # Reject path-qualified names rather than silently stripping directories.
@@ -84,7 +98,19 @@ class DesktopDocuments:
             raise ValueError("Import or create the document first")
         temporary = self.root / f".{uuid4().hex}{target.suffix}"
         try:
-            if target.suffix.lower() == ".docx":
+            if name in {"create_text", "append_text"}:
+                if target.suffix.lower() not in TEXT_EXTENSIONS:
+                    raise ValueError("Text operation requires a supported text extension")
+                content = args["content"]
+                if not isinstance(content, str):
+                    raise ValueError("Content must be text")
+                expected = (target.read_bytes().decode("utf-8") if name == "append_text" else "") + content
+                if len(expected.encode("utf-8")) > 1024 * 1024:
+                    raise ValueError("Text file exceeds 1 MB")
+                temporary.write_bytes(expected.encode("utf-8"))
+                if temporary.read_bytes() != expected.encode("utf-8"):
+                    raise ValueError("Text verification failed")
+            elif target.suffix.lower() == ".docx":
                 from docx import Document
                 document = Document(target) if name == "append_docx" else Document()
                 if name == "create_docx":

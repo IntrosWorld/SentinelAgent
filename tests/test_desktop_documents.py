@@ -64,7 +64,7 @@ async def test_decline_and_stop_never_create_files(tmp_path):
     assert not (tmp_path / "artifacts" / "stopped.pdf").exists()
 
 
-@pytest.mark.parametrize("goal", ["create ../outside.pdf", "create C:\\outside.docx", "delete report.pdf", "create hello.txt"])
+@pytest.mark.parametrize("goal", ["create ../outside.pdf", "create C:\\outside.docx", "delete report.pdf", "create hello.exe"])
 def test_invalid_document_commands(tmp_path, goal):
     with pytest.raises(ValueError):
         DesktopDocuments(tmp_path).plan(goal)

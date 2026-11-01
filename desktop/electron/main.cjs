@@ -160,10 +160,17 @@ async function hostCall(method, params) {
   if (method === "host.openArtifact") {
     const filename = params.filename;
     if (typeof filename !== "string" || filename !== path.basename(filename) ||
-        !/\.(docx|xlsx|pdf)$/i.test(filename)) throw Error("Invalid document");
+        !/\.(docx|xlsx|pdf|txt|md|js|html|css|ts|json|py|jsx|tsx|xml|yaml|yml|csv|svg)$/i.test(filename)) throw Error("Invalid document");
     const root = artifactsDirectory();
     const target = fs.realpathSync(path.join(root, filename));
     if (path.dirname(target) !== root) throw Error("Invalid document path");
+    if (!/\.(docx|xlsx|pdf)$/i.test(filename)) {
+      const decision = await dialog.showMessageBox(window, { type: "question", buttons: ["Cancel", "Preview"], defaultId: 0, cancelId: 0,
+        message: "Preview " + filename + "?", detail: "HTML runs in an isolated Chromium window with local CSS/JS support. Network access, downloads, popups and Node.js are blocked. Other source files are displayed as text, not executed." });
+      if (decision.response !== 1) return false;
+      await require("./file-preview.cjs").openPreview({ BrowserWindow, session }, target, root);
+      return true;
+    }
     const error = await shell.openPath(target);
     if (error) throw Error("Document could not be opened");
     return true;

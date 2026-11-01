@@ -25,6 +25,24 @@ In Auto or Control a window mode, `open Notepad`, `open Calculator`, and `open N
 
 ### Word, Excel and PDF in the desktop conversation
 
+Text and source files also work: `.txt`, `.md`, `.html`, `.css`, `.js`, `.ts`, `.jsx`, `.tsx`, `.json`, `.py`, `.xml`, `.yaml`, `.yml`, `.csv`, and `.svg`. Examples:
+
+```text
+create notes.txt with content Hello world
+create README.md with content # My project
+create index.html with content <h1>Hello world</h1>
+create style.css with content h1 { color: blue; }
+create app.js with content console.log('Hello');
+create example.ts with content const message: string = 'Hello';
+append notes.txt with content More text
+replace notes.txt with content Replacement text
+preview index.html
+```
+
+`create empty.txt` creates an empty file. Supply exact content, including multiline code, after `with content`; this command path does not generate code from a vague description. Each write needs approval, preserves UTF-8 content, verifies bytes, detects stale files, and backs up replaced files. Simple filenames only, one file per task, no arbitrary binary/executable generation. Existing files can be replaced or appended; structured source-code refactoring is not implemented.
+
+Use **Open file** on an HTML result or `preview index.html` to confirm opening an isolated Chromium preview. Local same-folder CSS and browser JavaScript work. Network access, Node.js, popups, frames, downloads and permissions are blocked; this is a restricted preview, not an OS-level hostile-code sandbox. Other source files open in a read-only text preview and are never shell-executed. TypeScript/JSX/TSX are stored as source, not compiled; npm installs, backend servers and arbitrary script execution are not supported. Source-file creation and HTML/CSS/JS rendering are tested with real Electron/Python outputs using `node desktop/tests/source-files-ui.cjs`; preview-renderer tests invoke the preview helper directly rather than automating its native confirmation dialog.
+
 **Auto** routes instructions containing a .docx, .xlsx or .pdf filename to local document operations. You can also select **Create or edit documents**. These operations need neither a model server nor a target window:
 
 ```text

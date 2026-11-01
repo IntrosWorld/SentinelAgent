@@ -39,7 +39,7 @@ class Request(BaseModel):
 
 class StartRun(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    goal: str = Field(min_length=3, max_length=2000)
+    goal: str = Field(min_length=3, max_length=24000)
     mode: Literal["desktop", "documents", "auto"] = "desktop"
     profile: str = "local-vision"
     window_id: int = Field(default=0, ge=0)
@@ -130,7 +130,7 @@ class DesktopService:
 
     async def dispatch(self, method: str, params: dict):
         if method == "status":
-            return {"version": "0.3.4", "workspace": str(self.root), "platform": sys.platform,
+            return {"version": "0.3.5", "workspace": str(self.root), "platform": sys.platform,
                     "ocr_available": shutil.which("tesseract") is not None,
                     "active_run": self.run_id if self.running and not self.running.done() else None}
         if method == "models.list":

@@ -74,7 +74,7 @@ export default function App() {
     [expectedText, setExpectedText] = useState("");
   const documentTask =
     taskMode === "documents" ||
-    (taskMode === "auto" && /\.(docx|xlsx|pdf)\b/i.test(goal));
+    (taskMode === "auto" && /\.(docx|xlsx|pdf|txt|md|js|html|css|ts|json|py|jsx|tsx|xml|yaml|yml|csv|svg)\b/i.test(goal));
   const running = task?.status === "running";
   const launchTask = taskMode !== "documents" && /^\s*(open|launch|start)\s+(notepad|calculator)(?:\s+and\s+(write|type)\s+.+)?\s*$/is.test(goal);
   async function act(fn: () => Promise<void>) {
@@ -143,6 +143,11 @@ export default function App() {
   async function start() {
     await act(async () => {
       const text = goal.trim();
+      const preview = /^preview\s+(\S+\.html)$/i.exec(text);
+      if (preview) {
+        await call("host.openArtifact", { filename: preview[1] });
+        return;
+      }
       await call("run.start", {
         goal: text,
         mode: taskMode,
@@ -813,7 +818,7 @@ export default function App() {
             </div>
             {documentTask ? (
               <p className="hint">
-                Examples: create report.docx with content Hello world; append
+                Examples: create index.html with content &lt;h1&gt;Hello&lt;/h1&gt;; preview index.html; create app.js with content console.log('Hello'); create notes.md with content # Notes; create report.docx with content Hello world; append
                 report.pdf with content Appendix; set B3 to 42 in results.xlsx.
                 For tables, use create results.xlsx with content {"{"}
                 "headers":["Item","Value"],"rows":[["Sales",42]]{"}"}. Files
