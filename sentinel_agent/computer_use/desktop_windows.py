@@ -54,7 +54,7 @@ _KEYS = {
     "SPACE": "{SPACE}", "BACKSPACE": "{BACKSPACE}", "DELETE": "{DELETE}",
     "LEFT": "{LEFT}", "RIGHT": "{RIGHT}", "UP": "{UP}", "DOWN": "{DOWN}",
     "HOME": "{HOME}", "END": "{END}", "PAGEUP": "{PGUP}", "PAGEDOWN": "{PGDN}",
-    "CTRL+A": "^a", "CTRL+Z": "^z", "CTRL+Y": "^y",
+    "CTRL+A": "^a", "CTRL+Z": "^z", "CTRL+Y": "^y", "CTRL+S": "^s", "CTRL+W": "^w",
 }
 assert set(_KEYS) == set(ALLOWED_DESKTOP_KEYS)
 
@@ -218,7 +218,7 @@ class _WindowsApi:
             pair = (Input * 2)(inputs[index * 2], inputs[index * 2 + 1])
             if self.user32.SendInput(2, pair, ctypes.sizeof(Input)) != 2:
                 raise DesktopFailure("Text input was not fully dispatched; do not retry automatically")
-            time.sleep(0.01)
+            time.sleep(0.03)
 
 
 class WindowsDesktopSession:

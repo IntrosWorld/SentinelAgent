@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 ALLOWED_DESKTOP_KEYS = frozenset({
     "ENTER", "TAB", "SHIFT+TAB", "ESC", "SPACE", "BACKSPACE", "DELETE",
     "LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN",
-    "CTRL+A", "CTRL+Z", "CTRL+Y",
+    "CTRL+A", "CTRL+Z", "CTRL+Y", "CTRL+S", "CTRL+W",
 })
 
 

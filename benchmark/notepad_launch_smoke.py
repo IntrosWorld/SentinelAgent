@@ -1,4 +1,4 @@
-"""Opt-in real Notepad launch/type test. Leaves the scratch window for review."""
+"""Opt-in real Notepad launch, type, save/readback and close test."""
 import asyncio
 import json
 from pathlib import Path
@@ -28,7 +28,8 @@ async def main():
         (root / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, indent=2), flush=True)
         print("Evidence:", root, flush=True)
-        assert result["status"] == "completed" and result["reason"] == "goal-verified"
+        assert result["status"] == "completed" and result["reason"] == "Notepad saved, verified and closed"
+        assert Path(result["saved_file"]).read_text() == "Sentinel opened Notepad and typed this text."
     finally:
         await service.close()
 

@@ -130,7 +130,7 @@ class DesktopService:
 
     async def dispatch(self, method: str, params: dict):
         if method == "status":
-            return {"version": "0.3.3", "workspace": str(self.root), "platform": sys.platform,
+            return {"version": "0.3.4", "workspace": str(self.root), "platform": sys.platform,
                     "ocr_available": shutil.which("tesseract") is not None,
                     "active_run": self.run_id if self.running and not self.running.done() else None}
         if method == "models.list":
@@ -331,6 +331,13 @@ class DesktopService:
                                    single_step=request.single_step, max_seconds=request.max_seconds)
                 with gateway.activate():
                     outcome = (await AdaptiveDesktopAgent(ReportingPlanner(), session, approve).run(task)).model_dump()
+                if launch and outcome["status"] == "completed":
+                    from sentinel_agent.desktop_launch import finish_notepad
+                    final = await finish_notepad(self.root, request.window_id, hint, launch[1], self.approval)
+                    outcome.update(final)
+                    if final.get("saved_file"):
+                        entry["saved_file"] = final["saved_file"]
+                        self.event("progress", message="Saved file: " + final["saved_file"])
             entry.update(status=outcome["status"], reason=outcome["reason"], steps=outcome["steps"])
             if outcome.get("artifacts"):
                 entry["artifacts"] = outcome["artifacts"]

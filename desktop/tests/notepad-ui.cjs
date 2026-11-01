@@ -24,16 +24,23 @@ const assert = require("node:assert/strict");
     // Wait for the second, distinct approval token rather than double-clicking.
     await page.getByRole("heading", { name: "type", exact: true }).waitFor();
     await page.getByRole("button", { name: "Approve once", exact: true }).click();
+    await page.getByRole("heading", { name: "save document", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Approve once", exact: true }).click();
+    await page.getByRole("heading", { name: "close document", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Approve once", exact: true }).click();
     await page.waitForFunction(async () => {
       const history = await window.sentinel.call("history.list");
       return history[0] && !["running", "approval"].includes(history[0].status);
     });
     const result = await page.evaluate(() => window.notepadResult);
     if (result && result.status !== "completed") console.log(JSON.stringify(result));
-    await page.getByText("completed: goal-verified", { exact: true }).waitFor();
+    await page.getByText("completed: Notepad saved, verified and closed", { exact: true }).waitFor();
     const history = await page.evaluate(() => window.sentinel.call("history.list"));
-    assert.equal(history[0].reason, "goal-verified");
-    console.log("PASS: real Electron -> launch Notepad -> approve typing -> content readback. " + root);
+    assert.equal(history[0].reason, "Notepad saved, verified and closed");
+    const files = fs.readdirSync(path.join(root, "agent", "artifacts")).filter(name => name.endsWith(".txt"));
+    assert.equal(files.length, 1);
+    assert.equal(fs.readFileSync(path.join(root, "agent", "artifacts", files[0]), "utf8"), "Hello from Sentinel desktop.");
+    console.log("PASS: real Electron -> launch Notepad -> type -> save -> verify file -> close. " + root);
   } finally {
     await app.close();
   }
