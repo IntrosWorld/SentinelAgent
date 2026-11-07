@@ -4,6 +4,8 @@ An offline-first, safety-aware computer-use agent research MVP. It can use Ollam
 
 ## Desktop app (Windows preview)
 
+For an interview/demo on an already configured Windows machine, double-click **Start-Sentinel.bat** in the repository root. It starts local Ollama only if localhost:11434 is unavailable, waits for readiness, lists installed models, and opens the current portable build (or unpacked build; development `npm start` is a fallback). First portable extraction may take a minute or more. Install Ollama and model weights beforehand and save/test the desired profile in **Models & setup**; the launcher does not download models or change profiles. Documents and literal Notepad tasks do not require model inference. Ollama stays running after the desktop app closes. For a nonstandard installation not on PATH, set `SENTINEL_OLLAMA_EXE` to the absolute `ollama.exe` path. Keep the BAT, scripts folder and desktop folder together. Read-only launcher verification: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-sentinel.ps1 -CheckOnly`.
+
 The `desktop-application` branch adds the approved conversation interface using Electron, React and TypeScript, with the existing Python agent in a separate process. This is our chosen architecture, not a claim about the complete proprietary stack of Claude or Codex.
 
 From the repository root, with Node.js 22.12+ (tested with 24) and Python 3.11+:
